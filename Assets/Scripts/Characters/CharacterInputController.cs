@@ -329,7 +329,8 @@ public class CharacterInputController : MonoBehaviour
 
             character.animator.SetFloat(s_JumpingSpeedHash, animSpeed);
             character.animator.SetBool(s_JumpingHash, true);
-			m_Audio.PlayOneShot(character.jumpSound);
+			if (RunnerAudioManager.instance != null)
+				RunnerAudioManager.instance.Play(RunnerClip.Jump);
 			m_Jumping = true;
         }
     }
@@ -360,7 +361,8 @@ public class CharacterInputController : MonoBehaviour
 
 			character.animator.SetFloat(s_JumpingSpeedHash, animSpeed);
 			character.animator.SetBool(s_SlidingHash, true);
-			m_Audio.PlayOneShot(slideSound);
+			if (RunnerAudioManager.instance != null)
+				RunnerAudioManager.instance.Play(RunnerClip.Slide);
 			m_Sliding = true;
 
 			characterCollider.Slide(true);
@@ -379,19 +381,24 @@ public class CharacterInputController : MonoBehaviour
 	}
 
 	public void ChangeLane(int direction)
-    {
+	{
 		if (!m_IsRunning)
 			return;
 
-        int targetLane = m_CurrentLane + direction;
+		int targetLane = m_CurrentLane + direction;
 
-        if (targetLane < 0 || targetLane > 2)
-            // Ignore, we are on the borders.
-            return;
+		if (targetLane < 0 || targetLane > 2)
+			return;
 
-        m_CurrentLane = targetLane;
-        m_TargetPosition = new Vector3((m_CurrentLane - 1) * trackManager.laneOffset, 0, 0);
-    }
+		m_CurrentLane = targetLane;
+		m_TargetPosition = new Vector3((m_CurrentLane - 1) * trackManager.laneOffset, 0, 0);
+
+		if (RunnerAudioManager.instance != null)
+		{
+			if (direction < 0) RunnerAudioManager.instance.Play(RunnerClip.LaneLeft);
+			else               RunnerAudioManager.instance.Play(RunnerClip.LaneRight);
+		}
+	}
 
     public void UseInventory()
     {
@@ -404,7 +411,8 @@ public class CharacterInputController : MonoBehaviour
 
     public void UseConsumable(Consumable c)
     {
-		characterCollider.audio.PlayOneShot(powerUpUseSound);
+		if (RunnerAudioManager.instance != null)
+			RunnerAudioManager.instance.Play(RunnerClip.PowerUp);
 
         for(int i = 0; i < m_ActiveConsumables.Count; ++i)
         {

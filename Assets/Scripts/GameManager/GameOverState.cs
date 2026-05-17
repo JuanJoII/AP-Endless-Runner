@@ -37,10 +37,10 @@ public class GameOverState : AState
 
 		CreditCoins();
 
-		if (MusicPlayer.instance.GetStem(0) != gameOverTheme)
-		{
-            MusicPlayer.instance.SetStem(0, gameOverTheme);
-			StartCoroutine(MusicPlayer.instance.RestartAllStems());
+		if (RunnerAudioManager.instance != null)
+        {
+            RunnerAudioManager.instance.StartGameOverMusic();
+            RunnerAudioManager.instance.Play(RunnerClip.GameOver);
         }
     }
 
@@ -72,6 +72,7 @@ public class GameOverState : AState
 
 	public void GoToStore()
     {
+        RunnerAudioManager.instance.Play(RunnerClip.UINavigate);
         UnityEngine.SceneManagement.SceneManager.LoadScene("shop", UnityEngine.SceneManagement.LoadSceneMode.Additive);
     }
 
@@ -79,11 +80,14 @@ public class GameOverState : AState
     public void GoToLoadout()
     {
         trackManager.isRerun = false;
+		RunnerAudioManager.instance.Play(RunnerClip.UINavigate);
 		manager.SwitchState("Loadout");
     }
 
     public void RunAgain()
     {
+        if (RunnerAudioManager.instance != null)
+            RunnerAudioManager.instance.Play(RunnerClip.UIConfirm);
         trackManager.isRerun = false;
         manager.SwitchState("Game");
     }

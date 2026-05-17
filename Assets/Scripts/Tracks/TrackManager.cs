@@ -466,6 +466,11 @@ public class TrackManager : MonoBehaviour
             }
 
             PlayerData.instance.UpdateMissions(this);
+            
+            if (RunnerAudioManager.instance != null)
+                RunnerAudioManager.instance.UpdateSpeed(speedRatio);
+
+            MusicPlayer.instance.UpdateVolumes(speedRatio);
         }
 
         MusicPlayer.instance.UpdateVolumes(speedRatio);

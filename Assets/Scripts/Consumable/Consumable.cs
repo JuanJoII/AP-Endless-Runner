@@ -56,10 +56,10 @@ public abstract class Consumable : MonoBehaviour
         m_SinceStart = 0;
 
 		if (activatedSound != null)
-		{
-			c.powerupSource.clip = activatedSound;
-			c.powerupSource.Play();
-		}
+        {
+            if (RunnerAudioManager.instance != null)
+                RunnerAudioManager.instance.Play(RunnerClip.PowerUp);
+        }
 
         if(ActivatedParticleReference != null)
         {

@@ -90,11 +90,8 @@ public class LoadoutState : AState
         // Reseting the global blinking value. Can happen if the game unexpectedly exited while still blinking
         Shader.SetGlobalFloat("_BlinkingValue", 0.0f);
 
-        if (MusicPlayer.instance.GetStem(0) != menuTheme)
-		{
-            MusicPlayer.instance.SetStem(0, menuTheme);
-            StartCoroutine(MusicPlayer.instance.RestartAllStems());
-        }
+        if (RunnerAudioManager.instance != null)
+            RunnerAudioManager.instance.StartMenuMusic();
 
         runButton.interactable = false;
         runButton.GetComponentInChildren<Text>().text = "Loading...";
@@ -182,6 +179,8 @@ public class LoadoutState : AState
 
     public void ChangeCharacter(int dir)
     {
+       if (RunnerAudioManager.instance != null)
+            RunnerAudioManager.instance.Play(RunnerClip.UIConfirm);
         PlayerData.instance.usedCharacter += dir;
         if (PlayerData.instance.usedCharacter >= PlayerData.instance.characters.Count)
             PlayerData.instance.usedCharacter = 0;
@@ -209,6 +208,8 @@ public class LoadoutState : AState
 
     public void ChangeTheme(int dir)
     {
+        if (RunnerAudioManager.instance != null)
+            RunnerAudioManager.instance.Play(RunnerClip.UIConfirm);
         PlayerData.instance.usedTheme += dir;
         if (PlayerData.instance.usedTheme >= PlayerData.instance.themes.Count)
             PlayerData.instance.usedTheme = 0;
@@ -393,6 +394,9 @@ public class LoadoutState : AState
 
     public void StartGame()
     {
+        if (RunnerAudioManager.instance != null)
+            RunnerAudioManager.instance.Play(RunnerClip.UIConfirm);
+
         if (PlayerData.instance.tutorialDone)
         {
             if (PlayerData.instance.ftueLevel == 1)

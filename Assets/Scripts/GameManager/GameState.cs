@@ -84,22 +84,24 @@ public class GameState : AState
     protected int m_CurrentSegmentObstacleIndex = 0;
     protected TrackSegment m_NextValidSegment = null;
     protected int k_ObstacleToClear = 3;
+    protected int m_LastCountdownNumber = -1;
 
     public override void Enter(AState from)
     {
+        Debug.Log($"countdownText={countdownText != null}");
+        Debug.Log($"lifeRectTransform={lifeRectTransform != null}");
+        
         m_CountdownRectTransform = countdownText.GetComponent<RectTransform>();
 
         m_LifeHearts = new Image[k_MaxLives];
         for (int i = 0; i < k_MaxLives; ++i)
         {
+            Debug.Log($"lifeRect child {i} = {lifeRectTransform.GetChild(i) != null}");
             m_LifeHearts[i] = lifeRectTransform.GetChild(i).GetComponent<Image>();
         }
 
-        if (MusicPlayer.instance.GetStem(0) != gameTheme)
-        {
-            MusicPlayer.instance.SetStem(0, gameTheme);
-            CoroutineHandler.StartStaticCoroutine(MusicPlayer.instance.RestartAllStems());
-        }
+        if (RunnerAudioManager.instance != null)
+            RunnerAudioManager.instance.StartGameMusic();
 
         m_AdsInitialised = false;
         m_GameoverSelectionDone = false;
@@ -127,6 +129,7 @@ public class GameState : AState
         downSlideTuto.SetActive(false);
         finishTuto.SetActive(false);
         tutorialValidatedObstacles.gameObject.SetActive(false);
+        m_LastCountdownNumber = -1;
 
         if (!trackManager.isRerun)
         {
@@ -354,15 +357,33 @@ public class GameState : AState
 		distanceText.text = Mathf.FloorToInt(trackManager.worldDistance).ToString() + "m";
 
 		if (trackManager.timeToStart >= 0)
-		{
-			countdownText.gameObject.SetActive(true);
-			countdownText.text = Mathf.Ceil(trackManager.timeToStart).ToString();
-			m_CountdownRectTransform.localScale = Vector3.one * (1.0f - (trackManager.timeToStart - Mathf.Floor(trackManager.timeToStart)));
-		}
-		else
-		{
-			m_CountdownRectTransform.localScale = Vector3.zero;
-		}
+        {
+            countdownText.gameObject.SetActive(true);
+            countdownText.text = Mathf.Ceil(trackManager.timeToStart).ToString();
+            m_CountdownRectTransform.localScale = Vector3.one * (1.0f - (trackManager.timeToStart - Mathf.Floor(trackManager.timeToStart)));
+
+            // Disparar beep cuando el número cambia
+            int currentCount = Mathf.CeilToInt(trackManager.timeToStart);
+            if (currentCount != m_LastCountdownNumber && RunnerAudioManager.instance != null)
+            {
+                m_LastCountdownNumber = currentCount;
+                if (currentCount == 1)
+                    RunnerAudioManager.instance.Play(RunnerClip.UIConfirm);  // más agudo en el 1
+                else
+                    RunnerAudioManager.instance.Play(RunnerClip.UINavigate); // beep normal para 5,4,3,2
+            }
+        }
+        else
+        {
+            m_CountdownRectTransform.localScale = Vector3.zero;
+
+            // GO — solo se dispara una vez cuando timeToStart pasa a negativo
+            if (m_LastCountdownNumber != 0 && RunnerAudioManager.instance != null)
+            {
+                m_LastCountdownNumber = 0;
+                RunnerAudioManager.instance.Play(RunnerClip.GameStart);
+            }
+        }
 
         // Consumable
         if (trackManager.characterController.inventory != null)
