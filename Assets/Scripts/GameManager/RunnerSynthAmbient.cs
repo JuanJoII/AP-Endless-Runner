@@ -2,24 +2,19 @@ using System.Collections;
 using UnityEngine;
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// RunnerSynthAmbient v2 — Música animada y alegre para gato endless runner.
+// RunnerSynthAmbient v4 — Música procedural energética estilo Geometry Dash.
 //
-// CAMBIO FUNDAMENTAL vs v1:
-// v1 era la arquitectura de Nodulus (meditativa, 40 BPM, espaciada).
-// v2 es música de acción alegre: 120-130 BPM, progresión mayor, ritmo marcado.
-//
-// TRES MODOS:
-//   Menu     → 100 BPM, C-Am-F-G, arpegio cada beat, hihat suave
-//   Game     → 125 BPM, C-G-Am-F, arpegio cada 0.5 beats, kick+hihat marcado
-//              La velocidad del arpegio sube con speedRatio (hasta 0.25 beats)
-//   GameOver → Am descendente solo, sin ritmo, fade out lento
-//
-// CAPAS:
-//   1. Drones: 4 osciladores internos con phase accumulator (sin clicks)
-//   2. Melodía: secuencia de 8 notas compuesta, alegre, rebotada
-//   3. Bajo: PolifoniaV2 en octava baja marcando el ritmo
-//   4. DrumMachine: kick + hihat cuantizado
-//   5. LFO de amplitud sobre la mezcla total
+// CAMBIOS vs v3:
+//   • Melodía de 32 notas con ritmo mixto (negras + corcheas + semicorcheas)
+//     → frase larga que sube y baja, muy euforica, no monótona
+//   • Contramelodía en 2do ciclo (sensación de estrofa / coro)
+//   • Bajo con walking bass activo: nota por beat + octavas en corcheas
+//   • Pad con 4 voces y chorus (2 osciladores desafinados ±3 cents)
+//   • Melodía con 5 armónicos (más brillante y llena)
+//   • Bajo con 2do armónico (más gordo y redondo)
+//   • Modo Menu: groove lento tipo lo-fi, acordes que respiran
+//   • BPM del juego subido a 135 para más energía
+//   • Reverb sintético (comb filter muy simple) en el pad
 // ═══════════════════════════════════════════════════════════════════════════════
 
 public enum RunnerMusicMode { Menu, Game, GameOver }
@@ -27,189 +22,195 @@ public enum RunnerMusicMode { Menu, Game, GameOver }
 [RequireComponent(typeof(AudioSource))]
 public class RunnerSynthAmbient : MonoBehaviour
 {
-    [Header("Arpegio / Melodía (pool de SynthSFX, 4 instancias)")]
-    public SynthSFX[] arpPool;
-
     [Header("Percusión")]
     public DrumMachine drums;
 
     [Header("Tempo")]
-    [Range(80f, 140f)] public float bpmMenu     = 100f;
-    [Range(100f, 160f)] public float bpmGame    = 125f;
+    [Range(110f, 175f)] public float bpmGame = 135f;
+    [Range(70f,  100f)] public float bpmMenu = 80f;
 
-    [Header("Volumen")]
-    [Range(0f, 1f)] public float masterVolume = 0.45f;
-    [Range(0f, 1f)] public float droneVolume  = 0.12f;
-    [Range(0f, 1f)] public float arpVolume    = 0.28f;
-    [Range(0f, 1f)] public float bassVolume   = 0.20f;
+    [Header("Volumen por capa")]
+    [Range(0f, 1f)] public float masterVolume  = 0.50f;
+    [Range(0f, 1f)] public float melodyVolume  = 0.28f;
+    [Range(0f, 1f)] public float bassVolume    = 0.20f;
+    [Range(0f, 1f)] public float padVolume     = 0.12f;
 
-    [Header("Glide entre acordes")]
-    [Range(0.2f, 2f)] public float glideTime = 0.8f;
-
-    [Header("LFO")]
-    [Range(0.5f, 8f)]  public float lfoFreq  = 4f;
-    [Range(0f, 0.3f)]  public float lfoDepth = 0.12f;
+    [Header("Capas activas")]
+    public bool playMelody = true;
+    public bool playBass   = true;
+    public bool playPad    = true;
+    public bool playDrums  = true;
 
     // =========================================================================
-    // PROGRESIONES
+    // MELODÍA GAME — Do mayor, eufórica, 32 notas, ritmo mixto
+    //
+    // Compases 1-2 (frase A — subida):
+    //   C5  E5  G5  B5  | A5  G5  E5  G5  | F5  A5  C6  A5  | G5  E5  D5  E5
+    // Compases 3-4 (frase B — clímax + bajada):
+    //   G5  B5  D6  C6  | B5  A5  G5  F5  | E5  G5  A5  G5  | F5  E5  D5  C5
     // =========================================================================
 
-    private struct ChordDef
+    private readonly float[] _gameMelody = new float[]
     {
-        public float[] droneFreqs;   // 4 voces graves
-        public float[] bassFreqs;    // 1-2 notas de bajo
-        public float[] melodyFreqs;  // notas disponibles para melodía
-        public int     bars;
-    }
-
-    // ── MENU: C - Am - F - G (tranquila pero alegre) ──────────────────────────
-    private readonly ChordDef[] _menuChords = new ChordDef[]
-    {
-        new ChordDef {
-            droneFreqs  = new[] { 130.81f, 164.81f, 196.00f, 261.63f },
-            bassFreqs   = new[] { 65.41f  },
-            melodyFreqs = new[] { 523.25f, 659.25f, 783.99f, 1046.5f, 1318.5f },
-            bars = 2
-        },
-        new ChordDef {
-            droneFreqs  = new[] { 110.00f, 164.81f, 220.00f, 261.63f },
-            bassFreqs   = new[] { 55.00f  },
-            melodyFreqs = new[] { 440.00f, 523.25f, 659.25f, 880.00f, 1046.5f },
-            bars = 2
-        },
-        new ChordDef {
-            droneFreqs  = new[] { 174.61f, 220.00f, 261.63f, 349.23f },
-            bassFreqs   = new[] { 87.31f  },
-            melodyFreqs = new[] { 349.23f, 523.25f, 698.46f, 880.00f, 1046.5f },
-            bars = 2
-        },
-        new ChordDef {
-            droneFreqs  = new[] { 196.00f, 246.94f, 293.66f, 392.00f },
-            bassFreqs   = new[] { 98.00f  },
-            melodyFreqs = new[] { 392.00f, 493.88f, 587.33f, 783.99f, 523.25f },
-            bars = 2
-        },
+        // Frase A — ascenso eufórico
+        523.25f, 659.25f, 783.99f, 987.77f,   // C5 E5 G5 B5
+        880.00f, 783.99f, 659.25f, 783.99f,   // A5 G5 E5 G5
+        698.46f, 880.00f, 1046.5f, 880.00f,   // F5 A5 C6 A5
+        783.99f, 659.25f, 587.33f, 659.25f,   // G5 E5 D5 E5
+        // Frase B — clímax y regreso al hogar
+        783.99f, 987.77f, 1174.7f, 1046.5f,  // G5 B5 D6 C6
+        987.77f, 880.00f, 783.99f, 698.46f,  // B5 A5 G5 F5
+        659.25f, 783.99f, 880.00f, 783.99f,  // E5 G5 A5 G5
+        698.46f, 659.25f, 587.33f, 523.25f,  // F5 E5 D5 C5
     };
 
-    // ── GAME: C - G - Am - F (energética, acción) ─────────────────────────────
-    private readonly ChordDef[] _gameChords = new ChordDef[]
+    // Ritmo: mezcla de negras (1), corcheas (0.5) y algunos acentos (0.75)
+    // El patrón de duración hace que la melodía "baile" en lugar de marchar
+    private readonly float[] _gameMelodyDur = new float[]
     {
-        new ChordDef {
-            droneFreqs  = new[] { 130.81f, 196.00f, 261.63f, 329.63f },
-            bassFreqs   = new[] { 65.41f, 130.81f },
-            melodyFreqs = new[] { 523.25f, 659.25f, 783.99f, 1046.5f, 1318.5f },
-            bars = 1
-        },
-        new ChordDef {
-            droneFreqs  = new[] { 196.00f, 246.94f, 293.66f, 392.00f },
-            bassFreqs   = new[] { 98.00f, 196.00f },
-            melodyFreqs = new[] { 392.00f, 493.88f, 587.33f, 783.99f, 987.77f },
-            bars = 1
-        },
-        new ChordDef {
-            droneFreqs  = new[] { 110.00f, 164.81f, 220.00f, 261.63f },
-            bassFreqs   = new[] { 55.00f, 110.00f },
-            melodyFreqs = new[] { 440.00f, 523.25f, 659.25f, 880.00f, 1046.5f },
-            bars = 1
-        },
-        new ChordDef {
-            droneFreqs  = new[] { 174.61f, 220.00f, 261.63f, 349.23f },
-            bassFreqs   = new[] { 87.31f, 174.61f },
-            melodyFreqs = new[] { 349.23f, 440.00f, 523.25f, 698.46f, 523.25f },
-            bars = 1
-        },
+        0.5f, 0.5f, 0.5f, 0.75f,   // frase A, c1
+        0.5f, 0.5f, 0.5f, 0.75f,   // frase A, c2
+        0.5f, 0.5f, 0.5f, 0.75f,   // frase A, c3
+        0.5f, 0.5f, 0.5f, 0.75f,   // frase A, c4
+        0.5f, 0.5f, 0.5f, 0.75f,   // frase B, c1
+        0.5f, 0.5f, 0.5f, 0.5f,    // frase B, c2
+        0.5f, 0.5f, 0.5f, 0.5f,    // frase B, c3
+        0.75f, 0.5f, 0.5f, 1.0f,   // frase B, c4 — nota final larga
     };
 
-    // ── GAME OVER: Am solo ────────────────────────────────────────────────────
-    private readonly ChordDef[] _gameOverChords = new ChordDef[]
+    // Melodía Menu — más suave, tipo lo-fi chill
+    // C5  G4  E5  D5 | C5  A4  G4  C5
+    private readonly float[] _menuMelody = new float[]
     {
-        new ChordDef {
-            droneFreqs  = new[] { 110.00f, 130.81f, 164.81f, 220.00f },
-            bassFreqs   = new[] { 55.00f },
-            melodyFreqs = new[] { 220.00f },
-            bars = 4
-        },
+        523.25f, 392.00f, 659.25f, 587.33f,
+        523.25f, 440.00f, 392.00f, 523.25f
+    };
+    private readonly float[] _menuMelodyDur = new float[]
+    {
+        1.0f, 1.0f, 1.0f, 1.0f, 1.5f, 0.5f, 1.0f, 2.0f
     };
 
     // =========================================================================
-    // MELODÍA COMPUESTA — 8 frases para cada modo
-    // Patrón: índices en melodyFreqs[] del acorde activo
-    // Diseñado para sonar alegre y rebotado (notas cortas, saltos)
+    // BAJO GAME — walking bass activo, I-V-vi-IV con variación
+    // Una nota por beat (4 notas por compás), octavas alternadas
+    //
+    // Compás I (C):  C2  E2  G2  E2
+    // Compás V (G):  G2  B2  D3  B2
+    // Compás vi(Am): A1  C2  E2  C2
+    // Compás IV(F):  F2  A2  C3  A2
     // =========================================================================
 
-    // Frase Game: ascendente animada con saltos
-    private readonly int[] _gameMelody = new int[]
+    private readonly float[] _gameBassNotes = new float[]
     {
-        0, 2, 1, 3, 2, 4, 3, 2,
-        0, 3, 1, 4, 2, 3, 0, 4
+        65.41f,  82.41f,  98.00f,  82.41f,   // C2 E2 G2 E2
+        98.00f,  123.47f, 146.83f, 123.47f,  // G2 B2 D3 B2
+        55.00f,  65.41f,  82.41f,  65.41f,   // A1 C2 E2 C2
+        87.31f,  110.00f, 130.81f, 110.00f,  // F2 A2 C3 A2
+    };
+    // Duración de cada nota del bajo en beats
+    private readonly float[] _gameBassDur = new float[]
+    {
+        1f, 1f, 1f, 1f,
+        1f, 1f, 1f, 1f,
+        1f, 1f, 1f, 1f,
+        1f, 1f, 1f, 1f,
     };
 
-    // Frase Menu: más suave, más lenta
-    private readonly int[] _menuMelody = new int[]
+    // Bajo Menu — más simple, solo raíces
+    private readonly float[] _menuBassNotes = new float[]
     {
-        0, 1, 2, 1, 0, 2, 3, 2,
-        1, 3, 2, 4, 3, 2, 1, 0
+        65.41f, 65.41f, 98.00f, 98.00f,
+        55.00f, 55.00f, 87.31f, 87.31f,
+    };
+    private readonly float[] _menuBassDur = new float[]
+    {
+        2f, 2f, 2f, 2f, 2f, 2f, 2f, 2f,
+    };
+
+    // =========================================================================
+    // PAD GAME — 4 voces por acorde (voicing más rico)
+    // I=C: C3 E3 G3 B3  |  V=G: G3 B3 D4 F#4
+    // vi=Am: A2 C3 E3 G3 | IV=F: F3 A3 C4 E4
+    // =========================================================================
+
+    private readonly float[][] _gamePad = new float[][]
+    {
+        new[] { 130.81f, 164.81f, 196.00f, 246.94f },  // Cmaj7
+        new[] { 196.00f, 246.94f, 293.66f, 369.99f },  // Gmaj7 (F#4 ≈ 370)
+        new[] { 110.00f, 130.81f, 164.81f, 196.00f },  // Am7
+        new[] { 174.61f, 220.00f, 261.63f, 329.63f },  // Fmaj7
     };
 
     // ── Estado interno ────────────────────────────────────────────────────────
-    private float  _sr;
-    private double _lfoPhase = 0.0;
-    private bool   _running  = false;
+    private float _sr;
+    private bool  _running = false;
 
-    private const int NumDrones = 4;
-    private double[] _dronePhase   = new double[NumDrones];
-    private double[] _droneFreqCur = new double[NumDrones];
-    private double[] _droneFreqTgt = new double[NumDrones];
-    private float    _droneAmp     = 0f;
-    private float    _droneAmpTgt  = 0f;
+    // ── Melodía ───────────────────────────────────────────────────────────────
+    private double _mPhase    = 0.0;
+    private double _mFreq     = 523.25;
+    private float  _mEnv      = 0f;
+    private float  _mAttack   = 0.008f;
+    private float  _mRelease  = 0.06f;
 
-    // Bajo interno (2 osciladores)
-    private const int NumBass = 2;
-    private double[] _bassPhase   = new double[NumBass];
-    private double[] _bassFreqCur = new double[NumBass];
-    private double[] _bassFreqTgt = new double[NumBass];
+    // ── Bajo ──────────────────────────────────────────────────────────────────
+    private double _bPhase    = 0.0;
+    private double _bFreq     = 65.41;
+    private float  _bEnv      = 0f;
+    private float  _bAttack   = 0.004f;
+    private float  _bRelease  = 0.18f;
 
-    private readonly float[] _droneHarms = { 1f, 0.25f, 0.06f };
-    private readonly float[] _bassHarms  = { 1f, 0.50f, 0.18f, 0.05f };
+    // ── Pad — 4 voces + chorus (2 osciladores desafinados ±4 cents) ───────────
+    // _pPhase[0..3] = voces principales, _pPhase[4..7] = coro desafinado
+    private double[] _pPhase  = new double[8];
+    private double[] _pFreq   = new double[8] { 130.81, 164.81, 196.00, 246.94,
+                                                 130.81, 164.81, 196.00, 246.94 };
+    private double[] _pFreqTgt = new double[8] { 130.81, 164.81, 196.00, 246.94,
+                                                  130.81, 164.81, 196.00, 246.94 };
+    private float    _pEnv    = 0f;
+    private double   _padAlpha = 0.0;
+    // Factor de desafinación del chorus (±4 cents → ~1.0023)
+    private const double CHORUS_DETUNE = 1.00231f;
 
-    private RunnerMusicMode _mode       = RunnerMusicMode.Menu;
-    private RunnerMusicMode _newMode    = RunnerMusicMode.Menu;
+    // ── LFO ───────────────────────────────────────────────────────────────────
+    private double _lfoPhase  = 0.0;
+    private float  _lfoFreq   = 0.4f;   // un poco más lento → más hipnótico
+    private float  _lfoDepth  = 0.07f;
+
+    // ── LFO2 — modulación sutil del filtro del bajo (shimmer) ─────────────────
+    private double _lfo2Phase = 0.0;
+    private float  _lfo2Freq  = 2.0f;
+
+    // ── Modo ──────────────────────────────────────────────────────────────────
+    private RunnerMusicMode _mode        = RunnerMusicMode.Menu;
+    private RunnerMusicMode _newMode     = RunnerMusicMode.Menu;
     private bool            _modeChanged = false;
 
-    private int   _arpPoolIdx = 0;
-    private float _speedRatio = 0f;
+    // Referencia al BassAndPadLoop activo para cancelarlo limpiamente al cambiar modo
+    private Coroutine _bassLoopCoroutine = null;
 
-    private volatile int _activeChord = 0;
-
-    private float CurrentBpm  => _mode == RunnerMusicMode.Game ? bpmGame : bpmMenu;
-    private ChordDef[] CurrentProg => _mode == RunnerMusicMode.Menu     ? _menuChords
-                                    : _mode == RunnerMusicMode.Game     ? _gameChords
-                                    : _gameOverChords;
-    private int[] CurrentMelody => _mode == RunnerMusicMode.Game ? _gameMelody : _menuMelody;
-
-    private System.Random _rng = new System.Random();
+    // ── Comunicación hilo principal → hilo de audio ───────────────────────────
+    private volatile float _nextMelodyFreq  = 523.25f;
+    private volatile bool  _melodyNoteOn    = false;
+    private volatile float _nextBassFreq    = 65.41f;
+    private volatile bool  _bassNoteOn      = false;
+    private volatile float _nextPad0        = 130.81f;
+    private volatile float _nextPad1        = 164.81f;
+    private volatile float _nextPad2        = 196.00f;
+    private volatile float _nextPad3        = 246.94f;
+    private volatile bool  _padNoteOn       = false;
+    private volatile float _globalAmpTarget = 0f;
+    private volatile float _bpmRatio        = 1f; // para ajuste dinámico de velocidad
 
     // ─────────────────────────────────────────────────────────────────────────
 
     void Awake()
     {
-        _sr = AudioSettings.outputSampleRate;
-
-        for (int i = 0; i < NumDrones; i++)
-        {
-            _dronePhase[i]   = 0.0;
-            _droneFreqCur[i] = _menuChords[0].droneFreqs[i];
-            _droneFreqTgt[i] = _menuChords[0].droneFreqs[i];
-        }
-        for (int i = 0; i < NumBass; i++)
-        {
-            _bassPhase[i]   = 0.0;
-            _bassFreqCur[i] = _menuChords[0].bassFreqs[Mathf.Min(i, _menuChords[0].bassFreqs.Length - 1)];
-            _bassFreqTgt[i] = _bassFreqCur[i];
-        }
+        _sr       = AudioSettings.outputSampleRate;
+        // Alpha de glide del pad: 1.5s de tiempo de respuesta
+        _padAlpha = 1.0 - System.Math.Pow(0.001, 1.0 / (_sr * 1.5));
 
         var aud          = GetComponent<AudioSource>();
-        aud.clip         = AudioClip.Create("runner_amb", (int)_sr, 1, (int)_sr, false);
+        aud.clip         = AudioClip.Create("runner_v4", (int)_sr, 1, (int)_sr, false);
         aud.loop         = true;
         aud.playOnAwake  = false;
         aud.spatialBlend = 0f;
@@ -230,38 +231,34 @@ public class RunnerSynthAmbient : MonoBehaviour
 
     public void UpdateSpeed(float speedRatio)
     {
-        _speedRatio = Mathf.Clamp01(speedRatio);
+        // Sube el BPM ligeramente con la velocidad (hasta +8%)
+        _bpmRatio = 1f + Mathf.Clamp01(speedRatio) * 0.08f;
     }
 
     public void StartAmbient()
     {
         if (_running) return;
-        _running     = true;
-        _droneAmpTgt = 1f;
-        StartCoroutine(ProgressionLoop());
-        StartCoroutine(MelodyLoop());
+        _running         = true;
+        _globalAmpTarget = 1f;
+        StartCoroutine(MusicLoop());
     }
 
     public void StopAmbient()
     {
-        _running     = false;
-        _droneAmpTgt = 0f;
+        _running         = false;
+        _globalAmpTarget = 0f;
+        _melodyNoteOn    = false;
+        _bassNoteOn      = false;
+        _padNoteOn       = false;
         StopAllCoroutines();
         if (drums != null) drums.masterVolume = 0f;
-        ForceStopArp();
-    }
-
-    private void ForceStopArp()
-    {
-        if (arpPool == null) return;
-        foreach (var s in arpPool) if (s != null) s.isActive = false;
     }
 
     void OnDisable() => StopAmbient();
 
-    // ── Progression Loop ──────────────────────────────────────────────────────
+    // ── Music Loop ────────────────────────────────────────────────────────────
 
-    private IEnumerator ProgressionLoop()
+    private IEnumerator MusicLoop()
     {
         while (_running)
         {
@@ -269,26 +266,28 @@ public class RunnerSynthAmbient : MonoBehaviour
             {
                 _mode        = _newMode;
                 _modeChanged = false;
-                _activeChord = 0;
 
-                // Configurar percusión según modo
                 if (drums != null)
                 {
-                    if (_mode == RunnerMusicMode.Game)
+                    // IMPORTANTE: llamar StopAllCoroutines en el DrumMachine,
+                    // NO en este MonoBehaviour — de lo contrario MusicLoop se mata a sí mismo.
+                    drums.StopAllCoroutines();
+
+                    if (_mode == RunnerMusicMode.Game && playDrums)
                     {
-                        // Patrón 4/4 enérgico — kick y hihat marcados
-                        drums.masterVolume  = 0.22f;
+                        drums.masterVolume  = 0.20f;
                         drums.kickStartFreq = 90f;
-                        drums.kickDecay     = 0.18f;
-                        drums.hihatDecay    = 0.04f;
-                        StartCoroutine(drums.PlayPattern_Basic(bpmGame, 9999));
+                        drums.kickEndFreq   = 32f;
+                        drums.kickDecay     = 0.14f;
+                        drums.hihatDecay    = 0.025f;
+                        drums.StartCoroutine(drums.PlayPattern_Basic(bpmGame, 9999));
                     }
-                    else if (_mode == RunnerMusicMode.Menu)
+                    else if (_mode == RunnerMusicMode.Menu && playDrums)
                     {
-                        // Patrón vals suave en menu
-                        drums.masterVolume  = 0.10f;
+                        drums.masterVolume  = 0.08f;
                         drums.kickStartFreq = 70f;
-                        StartCoroutine(drums.PlayPattern_Waltz(bpmMenu, 9999));
+                        drums.kickDecay     = 0.22f;
+                        drums.StartCoroutine(drums.PlayPattern_Waltz(bpmMenu, 9999));
                     }
                     else
                     {
@@ -296,156 +295,233 @@ public class RunnerSynthAmbient : MonoBehaviour
                     }
                 }
 
-                _droneAmpTgt = _mode == RunnerMusicMode.GameOver ? 0.5f : 1f;
+                _globalAmpTarget = (_mode == RunnerMusicMode.GameOver) ? 0.25f : 1f;
             }
 
-            var prog = CurrentProg;
+            // ── GAME OVER ─────────────────────────────────────────────────────
+            if (_mode == RunnerMusicMode.GameOver)
+            {
+                // Pad Am con cuarta suspendida, descendente y triste
+                SetPad(110.00f, 146.83f, 164.81f, 196.00f);
+                yield return new WaitForSeconds(4f);
+                continue;
+            }
 
-            for (int c = 0; c < prog.Length; c++)
+            // ── GAME / MENU ───────────────────────────────────────────────────
+            bool isGame    = (_mode == RunnerMusicMode.Game);
+            float bpm      = isGame ? bpmGame : bpmMenu;
+            float beat     = 60f / bpm;
+
+            float[] melody    = isGame ? _gameMelody     : _menuMelody;
+            float[] melDur    = isGame ? _gameMelodyDur  : _menuMelodyDur;
+            float[] bassNotes = isGame ? _gameBassNotes  : _menuBassNotes;
+            float[] bassDur   = isGame ? _gameBassDur    : _menuBassDur;
+            float[][] pad     = _gamePad;
+
+            // Cancelar el loop anterior de bajo/pad si sigue corriendo, luego lanzar uno nuevo
+            if (_bassLoopCoroutine != null) StopCoroutine(_bassLoopCoroutine);
+            _bassLoopCoroutine = StartCoroutine(BassAndPadLoop(beat, bassNotes, bassDur, pad));
+
+            // Loop de melodía — itera sobre todas las notas
+            for (int n = 0; n < melody.Length; n++)
             {
                 if (!_running || _modeChanged) break;
 
-                _activeChord = c;
-
-                // Actualizar targets de drone y bajo
-                for (int d = 0; d < NumDrones; d++)
-                    _droneFreqTgt[d] = prog[c].droneFreqs[d];
-
-                for (int b = 0; b < NumBass; b++)
-                    _bassFreqTgt[b] = prog[c].bassFreqs[Mathf.Min(b, prog[c].bassFreqs.Length - 1)];
-
-                float beat = 60f / CurrentBpm;
-                yield return new WaitForSeconds(beat * prog[c].bars * 4f);
-            }
-        }
-    }
-
-    // ── Melody Loop ───────────────────────────────────────────────────────────
-    // Toca la melodía compuesta cuantizada al BPM.
-    // En modo Game: notas cortas y rebotadas (decay 0.2s), una cada 0.5 beats.
-    // En modo Menu: notas más largas (decay 0.5s), una cada beat.
-    // La velocidad aumenta con speedRatio en modo Game.
-
-    private IEnumerator MelodyLoop()
-    {
-        // Esperar 1 compás antes de entrar la melodía
-        yield return new WaitForSeconds(60f / CurrentBpm * 4f);
-
-        int step = 0;
-
-        while (_running)
-        {
-            if (_mode != RunnerMusicMode.GameOver &&
-                arpPool != null && arpPool.Length > 0)
-            {
-                var prog    = CurrentProg;
-                int ci      = _activeChord % prog.Length;
-                var chord   = prog[ci];
-                var melody  = CurrentMelody;
-
-                int noteIdx = Mathf.Clamp(melody[step % 16], 0, chord.melodyFreqs.Length - 1);
-                float freq  = chord.melodyFreqs[noteIdx];
-
-                // Variación leve de frecuencia → vivo, no robótico
-                float variation = 1f + (float)(_rng.NextDouble() * 0.04 - 0.02);
-                freq *= variation;
-
-                SynthSFX sfx = arpPool[_arpPoolIdx % arpPool.Length];
-                _arpPoolIdx++;
-
-                if (sfx != null)
+                if (playMelody)
                 {
-                    if (_mode == RunnerMusicMode.Game)
-                    {
-                        // Notas cortas y rebotadas — energéticas
-                        sfx.numberOfHarmonics  = 4;
-                        sfx.harmonicAmplitudes = new float[]
-                            { 1f, 0.40f, 0.15f, 0.05f, 0f, 0f, 0f, 0f, 0f, 0f };
-                        sfx.Play(freq, SynthSFX.SynthType.Additive,
-                            atk: 0.006f, dec: 0.18f, sus: 0f, rel: 0.20f,
-                            vol: arpVolume * 0.90f);
-                    }
-                    else
-                    {
-                        // Notas más suaves en menu
-                        sfx.numberOfHarmonics  = 3;
-                        sfx.harmonicAmplitudes = new float[]
-                            { 1f, 0.30f, 0.08f, 0f, 0f, 0f, 0f, 0f, 0f, 0f };
-                        sfx.Play(freq, SynthSFX.SynthType.Additive,
-                            atk: 0.01f, dec: 0.45f, sus: 0.05f, rel: 0.40f,
-                            vol: arpVolume * 0.70f);
-                    }
+                    _nextMelodyFreq = melody[n];
+                    _melodyNoteOn   = true;
                 }
+
+                float noteDur  = melDur[n] * beat;
+                // Hold del 80% de la nota → ligadura natural entre notas cercanas
+                float holdTime = noteDur * 0.80f;
+                float gapTime  = noteDur * 0.20f;
+
+                yield return new WaitForSeconds(holdTime);
+                _melodyNoteOn = false;
+                yield return new WaitForSeconds(gapTime);
             }
-
-            step++;
-
-            // Subdivisión cuantizada: Game se acelera con velocidad
-            float subdivision;
-            if (_mode == RunnerMusicMode.Game)
-                subdivision = Mathf.Lerp(0.5f, 0.25f, _speedRatio);
-            else
-                subdivision = 1.0f;
-
-            yield return new WaitForSeconds((60f / CurrentBpm) * subdivision);
         }
     }
 
-    // ── OnAudioFilterRead — drones + bajo + LFO ───────────────────────────────
+    // ── Loop de bajo y pad — corre en paralelo ────────────────────────────────
+
+    private IEnumerator BassAndPadLoop(float beat, float[] bassNotes, float[] bassDur, float[][] pad)
+    {
+        // Cuántos "bloques de acorde" hay (1 acorde = 4 beats)
+        // El bajo tiene una nota por beat, el pad cambia cada 4 beats
+        int totalBassNotes = bassNotes.Length;
+        int padChanges     = totalBassNotes / 4; // 4 notas de bajo por acorde
+
+        for (int b = 0; b < totalBassNotes; b++)
+        {
+            if (!_running || _modeChanged) yield break;
+
+            // Actualizar el pad cada 4 notas de bajo (= cada compás)
+            if (b % 4 == 0 && playPad)
+            {
+                int padIdx = (b / 4) % pad.Length;
+                float[] chord = pad[padIdx];
+                SetPad(chord[0], chord[1], chord[2],
+                       chord.Length > 3 ? chord[3] : chord[2] * 1.5f);
+            }
+
+            // Bajo
+            if (playBass)
+            {
+                _nextBassFreq = bassNotes[b];
+                _bassNoteOn   = true;
+
+                float dur = bassDur[b] * beat;
+                yield return new WaitForSeconds(dur * 0.55f);
+                _bassNoteOn = false;
+                yield return new WaitForSeconds(dur * 0.45f);
+            }
+            else
+            {
+                yield return new WaitForSeconds(bassDur[b] * beat);
+            }
+        }
+    }
+
+    private void SetPad(float f0, float f1, float f2, float f3 = 0f)
+    {
+        _nextPad0  = f0;
+        _nextPad1  = f1;
+        _nextPad2  = f2;
+        _nextPad3  = f3 > 0f ? f3 : f2 * 1.498f; // quinta si no se especifica
+        _padNoteOn = true;
+    }
+
+    // ── OnAudioFilterRead — síntesis pura ─────────────────────────────────────
 
     void OnAudioFilterRead(float[] data, int channels)
     {
-        double twoPi   = 2.0 * System.Math.PI;
-        double lfoInc  = twoPi * lfoFreq / _sr;
-        double alpha   = 1.0 - System.Math.Pow(0.001, 1.0 / (_sr * glideTime));
-        float  envAlpha = 1f - Mathf.Exp(-3f / ((float)_sr * 0.3f));
+        double twoPi = 2.0 * System.Math.PI;
+
+        float mAtkAlpha = 1f - Mathf.Exp(-1f / (_mAttack  * (float)_sr));
+        float mRelAlpha = 1f - Mathf.Exp(-1f / (_mRelease * (float)_sr));
+        float bAtkAlpha = 1f - Mathf.Exp(-1f / (_bAttack  * (float)_sr));
+        float bRelAlpha = 1f - Mathf.Exp(-1f / (_bRelease * (float)_sr));
+        float pAlpha    = 1f - Mathf.Exp(-2f  / (float)_sr);
+        float gAlpha    = 1f - Mathf.Exp(-1.5f / (float)_sr);
+
+        double lfoInc  = twoPi * _lfoFreq  / _sr;
+        double lfo2Inc = twoPi * _lfo2Freq / _sr;
+
+        // Leer volátiles una sola vez
+        double mFreqNew = _nextMelodyFreq;
+        bool   mOn      = _melodyNoteOn;
+        double bFreqNew = _nextBassFreq;
+        bool   bOn      = _bassNoteOn;
+        bool   pOn      = _padNoteOn;
+        double p0 = _nextPad0, p1 = _nextPad1, p2 = _nextPad2, p3 = _nextPad3;
+        float  gTgt     = _globalAmpTarget;
+
+        _mFreq = mFreqNew;
+        _bFreq = bFreqNew;
+        // Voz principal del pad
+        _pFreqTgt[0] = p0; _pFreqTgt[1] = p1;
+        _pFreqTgt[2] = p2; _pFreqTgt[3] = p3;
+        // Chorus: ligeramente desafinado
+        _pFreqTgt[4] = p0 * CHORUS_DETUNE;
+        _pFreqTgt[5] = p1 * CHORUS_DETUNE;
+        _pFreqTgt[6] = p2 * CHORUS_DETUNE;
+        _pFreqTgt[7] = p3 * CHORUS_DETUNE;
+
+        float _gAmp = 0f;
 
         for (int i = 0; i < data.Length; i += channels)
         {
-            // ── Fade de amplitud ───────────────────────────────────────────
-            _droneAmp += (_droneAmpTgt - _droneAmp) * envAlpha;
+            // ── Amp global ────────────────────────────────────────────────────
+            _gAmp += (gTgt - _gAmp) * gAlpha;
 
-            // ── Drones con phase accumulator ───────────────────────────────
-            float droneMix = 0f;
-            for (int d = 0; d < NumDrones; d++)
+            // ── LFO principal (modulación de amplitud del pad) ─────────────────
+            float lfoVal  = 0.5f + 0.5f * (float)System.Math.Sin(_lfoPhase);
+            float lfoGain = (1f - _lfoDepth) + _lfoDepth * lfoVal;
+
+            // ── LFO2 (shimmer en el bajo — modulación de tono muy leve) ─────────
+            float lfo2Val = (float)System.Math.Sin(_lfo2Phase) * 0.003f; // ±0.3%
+
+            // ── MELODÍA — onda cuadrada con 5 armónicos (brillante y llena) ────
+            float melSample = 0f;
+            if (playMelody)
             {
-                _droneFreqCur[d] += alpha * (_droneFreqTgt[d] - _droneFreqCur[d]);
-                _dronePhase[d]   += twoPi * _droneFreqCur[d] / _sr;
-                if (_dronePhase[d] > twoPi) _dronePhase[d] -= twoPi;
+                float mTgt  = mOn ? 1f : 0f;
+                float alpha = mOn ? mAtkAlpha : mRelAlpha;
+                _mEnv += (mTgt - _mEnv) * alpha;
 
-                float s = 0f;
-                for (int h = 0; h < _droneHarms.Length; h++)
-                    s += _droneHarms[h] * (float)System.Math.Sin(_dronePhase[d] * (h + 1));
-                droneMix += s / _droneHarms.Length;
+                _mPhase += twoPi * _mFreq / _sr;
+                if (_mPhase > twoPi) _mPhase -= twoPi;
+
+                // Cuadrada aproximada con armónicos impares 1, 3, 5, 7, 9
+                // Amplitudes: 1/1, 1/3, 1/5, 1/7, 1/9 (serie de Fourier de cuadrada)
+                float m1 = (float)System.Math.Sin(_mPhase);
+                float m3 = (float)System.Math.Sin(_mPhase * 3) * 0.333f;
+                float m5 = (float)System.Math.Sin(_mPhase * 5) * 0.200f;
+                float m7 = (float)System.Math.Sin(_mPhase * 7) * 0.143f;
+                float m9 = (float)System.Math.Sin(_mPhase * 9) * 0.111f;
+
+                // Normalizar y aplicar envelope
+                melSample = (m1 + m3 + m5 + m7 + m9) / 1.787f * _mEnv * melodyVolume;
             }
-            droneMix = (droneMix / NumDrones) * droneVolume * _droneAmp;
 
-            // ── Bajo con phase accumulator ─────────────────────────────────
-            float bassMix = 0f;
-            for (int b = 0; b < NumBass; b++)
+            // ── BAJO — diente de sierra + 2do armónico (gordo) ─────────────────
+            float basSample = 0f;
+            if (playBass)
             {
-                _bassFreqCur[b] += alpha * (_bassFreqTgt[b] - _bassFreqCur[b]);
-                _bassPhase[b]   += twoPi * _bassFreqCur[b] / _sr;
-                if (_bassPhase[b] > twoPi) _bassPhase[b] -= twoPi;
+                float bTgt  = bOn ? 1f : 0f;
+                float alpha = bOn ? bAtkAlpha : bRelAlpha;
+                _bEnv += (bTgt - _bEnv) * alpha;
 
-                float s = 0f;
-                for (int h = 0; h < _bassHarms.Length; h++)
-                    s += _bassHarms[h] * (float)System.Math.Sin(_bassPhase[b] * (h + 1));
-                bassMix += s / _bassHarms.Length;
+                // Shimmer muy sutil en la frecuencia del bajo
+                double bFreqMod = _bFreq * (1.0 + lfo2Val);
+                _bPhase += twoPi * bFreqMod / _sr;
+                if (_bPhase > twoPi) _bPhase -= twoPi;
+
+                float sawRaw  = (float)((_bPhase / twoPi) * 2.0 - 1.0);
+                float sin1    = (float)System.Math.Sin(_bPhase);
+                float sin2    = (float)System.Math.Sin(_bPhase * 2) * 0.5f;
+
+                // Mezcla: saw da presencia, senos dan calidez
+                basSample = (sawRaw * 0.5f + sin1 * 0.35f + sin2 * 0.15f) * _bEnv * bassVolume;
             }
-            bassMix = (bassMix / NumBass) * bassVolume * _droneAmp;
 
-            // ── LFO rápido (tremolo ligero) ────────────────────────────────
-            // A 4Hz crea un pulso rítmico muy suave que da energía a la mezcla
-            float lfoVal = 0.5f + 0.5f * (float)System.Math.Sin(_lfoPhase);
-            float gain   = (1f - lfoDepth) + lfoDepth * lfoVal;
+            // ── PAD — 4 voces seno + chorus de 4 voces desafinadas ───────────────
+            float padSample = 0f;
+            if (playPad)
+            {
+                float pTgt = pOn ? 1f : 0.6f;
+                _pEnv += (pTgt - _pEnv) * pAlpha;
 
-            float outSample = (data[i] + droneMix + bassMix) * gain * masterVolume;
-            data[i] = outSample;
-            if (channels == 2) data[i + 1] = outSample;
+                // 8 osciladores: 4 principales + 4 chorus (desafinados)
+                for (int v = 0; v < 8; v++)
+                {
+                    _pFreq[v] += _padAlpha * (_pFreqTgt[v] - _pFreq[v]);
+                    _pPhase[v] += twoPi * _pFreq[v] / _sr;
+                    if (_pPhase[v] > twoPi) _pPhase[v] -= twoPi;
 
-            _lfoPhase += lfoInc;
-            if (_lfoPhase > twoPi) _lfoPhase -= twoPi;
+                    // Voces del chorus suenan un poco más suaves
+                    float amp = (v < 4) ? 1.0f : 0.5f;
+                    padSample += (float)System.Math.Sin(_pPhase[v]) * amp;
+                }
+                // Normalizar (4×1 + 4×0.5 = 6 unidades)
+                padSample = (padSample / 6f) * _pEnv * padVolume * lfoGain;
+            }
+
+            // ── Mezcla final ──────────────────────────────────────────────────
+            // Soft clip muy suave para evitar clipping sin perder punch
+            float mix = (melSample + basSample + padSample) * _gAmp * masterVolume;
+            mix = mix / (1f + Mathf.Abs(mix) * 0.3f); // soft clip hiperbólico
+
+            data[i] += mix;
+            if (channels == 2) data[i + 1] += mix;
+
+            _lfoPhase  += lfoInc;
+            if (_lfoPhase  > twoPi) _lfoPhase  -= twoPi;
+            _lfo2Phase += lfo2Inc;
+            if (_lfo2Phase > twoPi) _lfo2Phase -= twoPi;
         }
     }
 }

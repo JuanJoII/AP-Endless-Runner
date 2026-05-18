@@ -1,10 +1,13 @@
 using UnityEngine;
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// SynthSFX — Sintetizador one-shot corregido.
+// SynthSFX v3
 //
-// Esta versión usa un doble buffer de parámetros para comunicación segura
-// entre el hilo principal (Play) y el hilo de audio (OnAudioFilterRead).
+// CAMBIOS vs v2:
+//   • NoteOff(): dispara el release desde afuera — para slide y powerups sostenidos
+//   • ForceStop(): silencio inmediato (sin release) — para reusar slots del pool
+//   • El sustain ahora se sostiene indefinidamente hasta que llegue NoteOff()
+//     o ForceStop(). Antes se cortaba solo cuando sus<=0.001, ahora el caller decide.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 [RequireComponent(typeof(AudioSource))]
@@ -13,13 +16,13 @@ public class SynthSFX : MonoBehaviour
     public enum SynthType { Sine, Square, Saw, Additive, FM, Wavetable }
 
     [Header("Debug — valores actuales")]
-    public float     frequency  = 440f;
-    public SynthType synthType  = SynthType.Sine;
-    public float attack   = 0.01f;
-    public float decay    = 0.25f;
-    public float sustain  = 0f;
-    public float release  = 0.2f;
-    public float volume   = 0.4f;
+    public float     frequency = 440f;
+    public SynthType synthType = SynthType.Sine;
+    public float attack  = 0.01f;
+    public float decay   = 0.25f;
+    public float sustain = 0f;
+    public float release = 0.2f;
+    public float volume  = 0.4f;
 
     [Header("FM")]
     public float fmModFrequency = 220f;
@@ -39,25 +42,27 @@ public class SynthSFX : MonoBehaviour
     public bool isActive = false;
 
     // ── Internos ──────────────────────────────────────────────────────────────
-    private float       _sr;           // sample rate
+    private float       _sr;
     private AudioSource _aud;
 
-    // Doble buffer — main thread escribe en _p*, audio thread lee cuando hay reset
-    private volatile bool _pendingReset = false;
-    private float    _pFreq, _pAtk, _pDec, _pSus, _pRel, _pVol;
-    private float    _pFmFreq, _pFmIdx, _pSweepEnd, _pSweepDur;
-    private bool     _pSweep;
+    private volatile bool _pendingReset  = false;
+    private volatile bool _pendingStop   = false;
+    private volatile bool _pendingNoteOff = false;
+
+    private float     _pFreq, _pAtk, _pDec, _pSus, _pRel, _pVol;
+    private float     _pFmFreq, _pFmIdx, _pSweepEnd, _pSweepDur;
+    private bool      _pSweep;
     private SynthType _pType;
-    private float[]  _pHarm  = new float[10];
-    private int      _pNHarm = 5;
+    private float[]   _pHarm  = new float[10];
+    private int       _pNHarm = 5;
 
-    // Estado del envelope (solo leído/escrito en hilo de audio)
-    private int   _t         = 0;
-    private bool  _offSent   = false;
-    private int   _offIdx    = 0;
-    private float _envVal    = 0f;
+    private int   _t        = 0;
+    private bool  _offSent  = false;
+    private int   _offIdx   = 0;
+    private float _envVal   = 0f;
+    // Cuando es true, el sustain se sostiene hasta recibir NoteOff/ForceStop
+    private bool  _holdSustain = false;
 
-    // Wavetable
     private float[] _wt;
     private const int WTS = 2048;
 
@@ -67,55 +72,68 @@ public class SynthSFX : MonoBehaviour
     {
         _sr  = AudioSettings.outputSampleRate;
         _aud = GetComponent<AudioSource>();
-
-        // Clip de silencio en loop: mantiene OnAudioFilterRead activo
         _aud.clip         = AudioClip.Create("sfx_loop", (int)_sr, 1, (int)_sr, false);
         _aud.loop         = true;
         _aud.playOnAwake  = false;
-        _aud.spatialBlend = 0f;   // 2D obligatorio
+        _aud.spatialBlend = 0f;
         _aud.volume       = 1f;
         _aud.enabled      = true;
         _aud.Play();
-
-        Debug.Log($"[SynthSFX:{name}] Awake — playing={_aud.isPlaying} sr={_sr}");
     }
 
     // ── API ───────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Dispara el sonido. Si holdUntilNoteOff=true, el sustain se mantiene
+    /// indefinidamente hasta llamar NoteOff() o ForceStop().
+    /// </summary>
     public void Play(
         float freq, SynthType type,
         float atk, float dec, float sus, float rel,
-        float vol       = 0.4f,
-        float fmFreq    = 220f,
-        float fmIdx     = 1f,
-        bool  sweep     = false,
-        float sweepEnd  = 0f,
-        float sweepDur  = 0.4f)
+        float vol           = 0.4f,
+        float fmFreq        = 220f,
+        float fmIdx         = 1f,
+        bool  sweep         = false,
+        float sweepEnd      = 0f,
+        float sweepDur      = 0.4f,
+        bool  holdUntilNoteOff = false)
     {
-        // 1. Escribir parámetros en el buffer pendiente
-        _pFreq    = freq;   _pType  = type;
-        _pAtk     = atk;    _pDec   = dec;
-        _pSus     = sus;    _pRel   = rel;
+        _pFreq    = freq;   _pType    = type;
+        _pAtk     = atk;    _pDec     = dec;
+        _pSus     = sus;    _pRel     = rel;
         _pVol     = vol;
-        _pFmFreq  = fmFreq; _pFmIdx = fmIdx;
+        _pFmFreq  = fmFreq; _pFmIdx   = fmIdx;
         _pSweep   = sweep;  _pSweepEnd = sweepEnd; _pSweepDur = sweepDur;
         _pNHarm   = numberOfHarmonics;
         System.Array.Copy(harmonicAmplitudes, _pHarm, 10);
+        _holdSustain = holdUntilNoteOff;
 
         if (type == SynthType.Wavetable) BuildWT();
+        if (!_aud.isPlaying) _aud.Play();
 
-        // 2. Garantizar que el AudioSource esté corriendo
-        if (!_aud.isPlaying)
-        {
-            Debug.LogWarning($"[SynthSFX:{name}] AudioSource detenido — reiniciando");
-            _aud.Play();
-        }
+        isActive        = true;
+        _pendingStop    = false;
+        _pendingNoteOff = false;
+        _pendingReset   = true;
+    }
 
-        // 3. Activar — el reset real ocurre en el hilo de audio
-        isActive      = true;
-        _pendingReset = true;
+    /// <summary>
+    /// Dispara el release del sonido sostenido. Llamar cuando termina la acción
+    /// (ej: el personaje deja de deslizarse, o termina el powerup).
+    /// </summary>
+    public void NoteOff()
+    {
+        if (isActive) _pendingNoteOff = true;
+    }
 
-        Debug.Log($"[SynthSFX:{name}] Play f={freq} t={type} playing={_aud.isPlaying}");
+    /// <summary>
+    /// Silencio inmediato sin release. Para reusar el slot del pool.
+    /// </summary>
+    public void ForceStop()
+    {
+        isActive      = false;
+        _pendingStop  = true;
+        _holdSustain  = false;
     }
 
     // ── Wavetable ─────────────────────────────────────────────────────────────
@@ -171,7 +189,7 @@ public class SynthSFX : MonoBehaviour
     private float CurFreq()
     {
         if (!_pSweep) return _pFreq;
-        return Mathf.Lerp(_pFreq, _pSweepEnd, Mathf.Clamp01((_t/_sr)/_pSweepDur));
+        return Mathf.Lerp(_pFreq, _pSweepEnd, Mathf.Clamp01((_t / _sr) / _pSweepDur));
     }
 
     // ── ADSR ─────────────────────────────────────────────────────────────────
@@ -185,12 +203,25 @@ public class SynthSFX : MonoBehaviour
 
         if (!_offSent)
         {
-            if      (_t < atkS)        env = _t / atkS;
-            else if (_t < atkS + decS) env = Mathf.Lerp(1f, _pSus, (_t - atkS) / decS);
+            if (_t < atkS)
+            {
+                env = _t / atkS;
+            }
+            else if (_t < atkS + decS)
+            {
+                env = Mathf.Lerp(1f, _pSus, (_t - atkS) / decS);
+            }
             else
             {
                 env = _pSus;
-                if (_pSus <= 0.001f) { _offSent = true; _offIdx = _t; _envVal = 0f; }
+                // Si _holdSustain=true, se queda aquí hasta NoteOff/ForceStop.
+                // Si _holdSustain=false y sus=0, entra al release automáticamente.
+                if (!_holdSustain && _pSus <= 0.001f)
+                {
+                    _offSent = true;
+                    _offIdx  = _t;
+                    _envVal  = 0f;
+                }
             }
         }
         else
@@ -208,13 +239,31 @@ public class SynthSFX : MonoBehaviour
 
     void OnAudioFilterRead(float[] data, int channels)
     {
+        if (_pendingStop)
+        {
+            for (int i = 0; i < data.Length; i++) data[i] = 0f;
+            _pendingStop = false;
+            return;
+        }
+
         if (_pendingReset)
         {
-            _t        = 0;
-            _offSent  = false;
-            _offIdx   = 0;
-            _envVal   = 0f;
-            _pendingReset = false;
+            _t              = 0;
+            _offSent        = false;
+            _offIdx         = 0;
+            _envVal         = 0f;
+            _pendingReset   = false;
+            _pendingNoteOff = false;
+        }
+
+        // Aplicar NoteOff si llegó desde el hilo principal
+        if (_pendingNoteOff && !_offSent)
+        {
+            _offSent        = true;
+            _offIdx         = _t;
+            _envVal         = _envVal > 0f ? _envVal : _pSus;
+            _pendingNoteOff = false;
+            _holdSustain    = false;
         }
 
         for (int i = 0; i < data.Length; i += channels)

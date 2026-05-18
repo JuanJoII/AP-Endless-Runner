@@ -2,26 +2,39 @@ using System.Collections;
 using UnityEngine;
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// RunnerAudioManager v2 — Audio procedural mejorado para Endless Runner.
+// RunnerAudioManager v4
 //
-// MEJORAS vs v1:
-//   • Variación procedural de frecuencia ±8% en cada disparo → sonido "vivo"
-//   • PlayLooping() para consumables con duración (invencibilidad, imán, x2)
-//   • Slide rediseñado: FM con modulación alta + sweep descendente
-//   • Moneda premium: arpegio de 5 notas con aceleración
-//   • SFX del gato más expresivos (jump con aceleración, death más dramático)
+// CAMBIOS vs v3:
+//
+// SLIDE:
+//   • Usa un slot dedicado (_slideSlot) que persiste mientras el personaje
+//     está agachado. PlaySlide() inicia el sonido con holdUntilNoteOff=true.
+//     StopSlide() llama NoteOff() para el release limpio.
+//   • El sonido es un sweep descendente suave de 600→150Hz (no FM agresivo).
+//   • El caller (CharacterInputController o quien maneje el slide) debe llamar
+//     PlaySlide() al entrar al slide y StopSlide() al salir.
+//
+// MONEDAS (huesos de pescado):
+//   • Arpeggio ascendente acumulativo: cada recolección consecutiva sube un
+//     semitono. Si pasan >0.5s sin recolectar, el tono se resetea.
+//   • Dos capas: ping agudo (sine) + subarmónico suave — como moneda metálica.
+//
+// COLLECTABLES / POWERUPS (imán, invencibilidad, multiplicador):
+//   • Ya no usan PlayLooping(). Tienen un slot SynthSFX dedicado (_powerupSlot)
+//     que se sostiene con holdUntilNoteOff=true durante toda la duración.
+//   • El tono del powerup varía según el tipo (frecuencias distintas).
+//   • Un LFO suave se simula alternando dos notas con glide para dar movimiento
+//     sin cortes.
+//   • StopPowerupSound() llama NoteOff() para el release final.
+//
 // ═══════════════════════════════════════════════════════════════════════════════
 
 public enum RunnerClip
 {
-    // Jugador
     Jump, Slide, LaneLeft, LaneRight, Hit, Death,
-    // Objetos
     Coin, CoinPremium, PowerUp, ObstacleHit,
-    // Objetos con identidad propia
     Object_Barrier, Object_Missile,
     Object_Magnet, Object_Invincible, Object_Multiplier,
-    // UI
     UINavigate, UIConfirm, UICancel, GameOver, GameStart,
 }
 
@@ -30,11 +43,14 @@ public class RunnerAudioManager : MonoBehaviour
 {
     public static RunnerAudioManager instance { get; private set; }
 
-    [Header("Pool de SynthSFX (6 instancias)")]
+    [Header("Pool de SynthSFX (6 instancias para one-shots)")]
     public SynthSFX[] sfxPool;
 
-    [Header("Pool de looping (3 instancias para consumables)")]
-    public SynthSFX[] loopPool;
+    [Header("Slot dedicado para el slide (1 instancia)")]
+    public SynthSFX slideSlot;
+
+    [Header("Slot dedicado para powerups sostenidos (1 instancia)")]
+    public SynthSFX powerupSlot;
 
     [Header("Música de fondo")]
     public RunnerSynthAmbient synthAmbient;
@@ -43,12 +59,25 @@ public class RunnerAudioManager : MonoBehaviour
     [Range(0f, 1f)] public float sfxVolume    = 1f;
     [Range(0f, 1f)] public float masterVolume = 1f;
 
-    private int   _poolIdx    = 0;
-    private float _lastSpeed  = 0f;
+    // ── Estado interno ────────────────────────────────────────────────────────
+    private int   _poolIdx   = 0;
+    private float _lastSpeed = 0f;
 
-    // Coroutine activa de looping para poder cancelarla
-    private Coroutine _loopCoroutine = null;
-    private SynthSFX  _loopingSFX    = null;
+    // Arpeggio acumulativo de monedas
+    private int   _coinStep      = 0;   // semitono actual (0..11)
+    private float _lastCoinTime  = -1f;
+    private const float COIN_RESET_TIME = 0.5f; // tiempo sin recolectar → reset
+    // Escala pentatónica menor para que suene musical aunque suba mucho
+    // (en lugar de semitono libre, sube por la escala)
+    private static readonly float[] s_CoinScale = new float[]
+    {
+        1.000f,  // C
+        1.122f,  // D
+        1.260f,  // E
+        1.498f,  // G
+        1.682f,  // A
+        2.000f,  // C octava alta → vuelve a empezar
+    };
 
     private System.Random _rng = new System.Random();
 
@@ -61,21 +90,19 @@ public class RunnerAudioManager : MonoBehaviour
         DontDestroyOnLoad(gameObject);
     }
 
-    // ── Pool ──────────────────────────────────────────────────────────────────
+    // ── Pool (solo one-shots) ─────────────────────────────────────────────────
 
     private SynthSFX Next()
     {
         SynthSFX sfx = sfxPool[_poolIdx % sfxPool.Length];
         _poolIdx++;
+        if (sfx.isActive) sfx.ForceStop();
         return sfx;
     }
 
-    // Variación procedural de frecuencia ±range%
-    // Hace que cada sonido sea ligeramente diferente → evita monotonía robótica
-    private float Vary(float freq, float range = 0.08f)
+    private float Vary(float freq, float range = 0.05f)
     {
-        float variation = 1f + (float)(_rng.NextDouble() * 2.0 - 1.0) * range;
-        return freq * variation;
+        return freq * (1f + (float)(_rng.NextDouble() * 2.0 - 1.0) * range);
     }
 
     // ── API pública ───────────────────────────────────────────────────────────
@@ -86,57 +113,117 @@ public class RunnerAudioManager : MonoBehaviour
         TriggerSFX(clip, volumeScale * sfxVolume * masterVolume);
     }
 
-    // Reproduce un sonido en loop durante 'duration' segundos
-    // Usado por consumables (invencibilidad, imán, multiplicador)
+    // ── Slide — se llama una sola vez al entrar al slide ──────────────────────
+
+    /// <summary>
+    /// Llama esto cuando el personaje empieza a deslizarse.
+    /// El sonido se sostiene hasta que llames StopSlide().
+    /// </summary>
+    public void PlaySlide()
+    {
+        if (slideSlot == null) return;
+        if (slideSlot.isActive) slideSlot.ForceStop();
+
+        float vol = sfxVolume * masterVolume;
+
+        // Sweep de 550Hz → 140Hz en 0.35s: fricción que baja al agacharse
+        // Sine suave — no FM agresivo, no duele los oídos
+        // holdUntilNoteOff=true → se queda en sustain hasta StopSlide()
+        slideSlot.Play(
+            freq: 550f,
+            type: SynthSFX.SynthType.Sine,
+            atk:  0.015f,
+            dec:  0.30f,
+            sus:  0.08f,   // sustain bajo pero audible
+            rel:  0.25f,
+            vol:  0.35f * vol,
+            sweep: true,
+            sweepEnd: 140f,
+            sweepDur: 0.35f,
+            holdUntilNoteOff: true
+        );
+    }
+
+    /// <summary>
+    /// Llama esto cuando el personaje termina de deslizarse.
+    /// Dispara el release del sonido.
+    /// </summary>
+    public void StopSlide()
+    {
+        if (slideSlot != null) slideSlot.NoteOff();
+    }
+
+    // ── Powerup sostenido ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Inicia el sonido de un powerup activo. Se sostiene hasta StopPowerupSound().
+    /// </summary>
+    public void PlayPowerupSound(RunnerClip clip)
+    {
+        if (powerupSlot == null) return;
+        if (powerupSlot.isActive) powerupSlot.ForceStop();
+
+        float vol = sfxVolume * masterVolume;
+
+        switch (clip)
+        {
+            // Imán: pulso suave, tono medio-bajo, sweep de octava lento
+            case RunnerClip.Object_Magnet:
+                powerupSlot.Play(
+                    freq: 280f,
+                    type: SynthSFX.SynthType.Sine,
+                    atk:  0.20f, dec: 0.40f, sus: 0.45f, rel: 0.60f,
+                    vol:  0.28f * vol,
+                    sweep: true, sweepEnd: 350f, sweepDur: 8f,
+                    holdUntilNoteOff: true);
+                break;
+
+            // Invencibilidad: brillante, agudo, sweep ascendente amplio
+            case RunnerClip.Object_Invincible:
+                powerupSlot.Play(
+                    freq: 660f,
+                    type: SynthSFX.SynthType.Additive,
+                    atk:  0.12f, dec: 0.35f, sus: 0.55f, rel: 0.70f,
+                    vol:  0.32f * vol,
+                    sweep: true, sweepEnd: 880f, sweepDur: 9f,
+                    holdUntilNoteOff: true);
+                break;
+
+            // Multiplicador x2: FM suave, pulsante, tono medio
+            case RunnerClip.Object_Multiplier:
+                powerupSlot.Play(
+                    freq: 520f,
+                    type: SynthSFX.SynthType.FM,
+                    atk:  0.10f, dec: 0.30f, sus: 0.40f, rel: 0.65f,
+                    vol:  0.28f * vol,
+                    fmFreq: 520f * 0.25f, fmIdx: 0.5f,
+                    sweep: true, sweepEnd: 600f, sweepDur: 9f,
+                    holdUntilNoteOff: true);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Termina el sonido del powerup con release suave.
+    /// </summary>
+    public void StopPowerupSound()
+    {
+        if (powerupSlot != null) powerupSlot.NoteOff();
+    }
+
+    // Compatibilidad con el sistema anterior de looping (por si acaso)
     public void PlayLooping(RunnerClip clip, float duration)
     {
-        StopLooping();
-        if (loopPool == null || loopPool.Length == 0) return;
-        _loopingSFX    = loopPool[0];
-        _loopCoroutine = StartCoroutine(LoopSFX(clip, duration));
+        PlayPowerupSound(clip);
     }
-
     public void StopLooping()
     {
-        if (_loopCoroutine != null)
-        {
-            StopCoroutine(_loopCoroutine);
-            _loopCoroutine = null;
-        }
-        if (_loopingSFX != null)
-        {
-            _loopingSFX.isActive = false;
-            _loopingSFX = null;
-        }
+        StopPowerupSound();
     }
 
-    private IEnumerator LoopSFX(RunnerClip clip, float duration)
-    {
-        float elapsed = 0f;
-        while (elapsed < duration)
-        {
-            TriggerLooping(clip);
-            // Repetir cada 0.8s — el release del sonido cubre el gap
-            yield return new WaitForSeconds(0.8f);
-            elapsed += 0.8f;
-        }
-        StopLooping();
-    }
-
-    public void StartMenuMusic()
-    {
-        if (synthAmbient != null) synthAmbient.SetMode(RunnerMusicMode.Menu);
-    }
-
-    public void StartGameMusic()
-    {
-        if (synthAmbient != null) synthAmbient.SetMode(RunnerMusicMode.Game);
-    }
-
-    public void StartGameOverMusic()
-    {
-        if (synthAmbient != null) synthAmbient.SetMode(RunnerMusicMode.GameOver);
-    }
+    public void StartMenuMusic()    { if (synthAmbient != null) synthAmbient.SetMode(RunnerMusicMode.Menu); }
+    public void StartGameMusic()    { if (synthAmbient != null) synthAmbient.SetMode(RunnerMusicMode.Game); }
+    public void StartGameOverMusic(){ if (synthAmbient != null) synthAmbient.SetMode(RunnerMusicMode.GameOver); }
 
     public void UpdateSpeed(float speedRatio)
     {
@@ -144,265 +231,200 @@ public class RunnerAudioManager : MonoBehaviour
         if (synthAmbient != null) synthAmbient.UpdateSpeed(speedRatio);
     }
 
-    // ── Mapa de eventos → síntesis ────────────────────────────────────────────
+    // ── Mapa de clips → síntesis (one-shots) ─────────────────────────────────
 
     private void TriggerSFX(RunnerClip clip, float vol)
     {
         switch (clip)
         {
             // ── SALTO ─────────────────────────────────────────────────────────
-            // Aditiva con sweep ascendente: impulso y elevación
-            // Variación de ±8% en frecuencia → cada salto suena ligeramente distinto
-            // La frecuencia sube con la velocidad del juego (más rápido = más agudo)
             case RunnerClip.Jump:
             {
-                float baseFreq = Vary(280f + _lastSpeed * 80f);
-                Next().Play(baseFreq, SynthSFX.SynthType.Additive,
-                    atk: 0.008f, dec: 0.25f, sus: 0f, rel: 0.20f,
-                    vol: 0.55f * vol,
-                    sweep: true, sweepEnd: baseFreq * 2.1f, sweepDur: 0.25f);
+                float f = Vary(400f + _lastSpeed * 60f);
+                Next().Play(f, SynthSFX.SynthType.Additive,
+                    atk: 0.005f, dec: 0.16f, sus: 0f, rel: 0.12f,
+                    vol: 0.46f * vol,
+                    sweep: true, sweepEnd: f * 2.2f, sweepDur: 0.18f);
                 break;
             }
 
-            // ── DESLIZAMIENTO ─────────────────────────────────────────────────
-            // FM con índice alto + sweep descendente: fricción real, movimiento bajo
-            // El índice 4.5 genera ruido casi blanco → textura de roce
-            // Sweep de 300→80Hz en 0.4s = sensación de agacharse rápido
+            // ── SLIDE — redirigido a PlaySlide() ──────────────────────────────
+            // El slide ya no se dispara desde Play(RunnerClip.Slide).
+            // El CharacterInputController debe llamar PlaySlide()/StopSlide().
+            // Este case queda como fallback por si algo llama Play(Slide).
             case RunnerClip.Slide:
-            {
-                float f = Vary(300f);
-                Next().Play(f, SynthSFX.SynthType.FM,
-                    atk: 0.01f, dec: 0.35f, sus: 0.05f, rel: 0.25f,
-                    vol: 0.50f * vol,
-                    fmFreq: f * 0.5f, fmIdx: 4.5f,
-                    sweep: true, sweepEnd: 80f, sweepDur: 0.35f);
+                PlaySlide();
                 break;
-            }
 
             // ── CARRIL IZQUIERDA ──────────────────────────────────────────────
-            // Seno descendente: movimiento hacia la izquierda = tono baja
             case RunnerClip.LaneLeft:
             {
                 float f = Vary(500f);
                 Next().Play(f, SynthSFX.SynthType.Sine,
-                    atk: 0.005f, dec: 0.10f, sus: 0f, rel: 0.07f,
-                    vol: 0.28f * vol,
-                    sweep: true, sweepEnd: f * 0.72f, sweepDur: 0.10f);
+                    atk: 0.003f, dec: 0.08f, sus: 0f, rel: 0.05f,
+                    vol: 0.24f * vol,
+                    sweep: true, sweepEnd: f * 0.75f, sweepDur: 0.08f);
                 break;
             }
 
             // ── CARRIL DERECHA ────────────────────────────────────────────────
-            // Seno ascendente: movimiento hacia la derecha = tono sube
             case RunnerClip.LaneRight:
             {
-                float f = Vary(370f);
+                float f = Vary(380f);
                 Next().Play(f, SynthSFX.SynthType.Sine,
-                    atk: 0.005f, dec: 0.10f, sus: 0f, rel: 0.07f,
-                    vol: 0.28f * vol,
-                    sweep: true, sweepEnd: f * 1.38f, sweepDur: 0.10f);
+                    atk: 0.003f, dec: 0.08f, sus: 0f, rel: 0.05f,
+                    vol: 0.24f * vol,
+                    sweep: true, sweepEnd: f * 1.33f, sweepDur: 0.08f);
                 break;
             }
 
             // ── GOLPE ─────────────────────────────────────────────────────────
-            // FM con índice muy alto: impacto brusco, inarmónico
-            // Dos capas simultáneas: golpe + resonancia
             case RunnerClip.Hit:
             {
-                float f = Vary(200f);
+                float f = Vary(210f);
                 Next().Play(f, SynthSFX.SynthType.FM,
-                    atk: 0.003f, dec: 0.30f, sus: 0f, rel: 0.18f,
-                    vol: 0.65f * vol,
-                    fmFreq: f * 1.7f, fmIdx: 4.0f);
-                // Segunda capa: resonancia grave
+                    atk: 0.002f, dec: 0.26f, sus: 0f, rel: 0.14f,
+                    vol: 0.58f * vol,
+                    fmFreq: f * 1.8f, fmIdx: 4.2f);
                 Next().Play(Vary(95f), SynthSFX.SynthType.Sine,
-                    atk: 0.005f, dec: 0.45f, sus: 0f, rel: 0.30f,
-                    vol: 0.35f * vol);
+                    atk: 0.003f, dec: 0.38f, sus: 0f, rel: 0.25f,
+                    vol: 0.28f * vol);
                 break;
             }
 
             // ── MUERTE ────────────────────────────────────────────────────────
-            // FM grave descendente largo + arpeggio descendente
-            // Transmite colapso total, derrota
             case RunnerClip.Death:
                 StartCoroutine(PlayDeathSequence(vol));
                 break;
 
-            // ── MONEDA ────────────────────────────────────────────────────────
-            // Aditiva brillante, corta
-            // Variación alta (±12%) → cada moneda suena diferente, no robótico
+            // ── MONEDA / HUESO DE PESCADO ─────────────────────────────────────
+            // Arpeggio acumulativo: sube por la escala pentatónica con cada
+            // recolección consecutiva. Se resetea si pasan más de 0.5s.
             case RunnerClip.Coin:
             {
-                float f = Vary(880f, 0.12f);
-                Next().Play(f, SynthSFX.SynthType.Additive,
-                    atk: 0.004f, dec: 0.12f, sus: 0f, rel: 0.10f,
-                    vol: 0.40f * vol);
+                // Resetear si pasó demasiado tiempo desde la última moneda
+                if (Time.time - _lastCoinTime > COIN_RESET_TIME)
+                    _coinStep = 0;
+                _lastCoinTime = Time.time;
+
+                float baseFreq = 1100f; // C6 como raíz
+                float ratio    = s_CoinScale[_coinStep % s_CoinScale.Length];
+                // Si llegamos al final de la escala, duplicar la octava base
+                int octave     = _coinStep / s_CoinScale.Length;
+                float freq     = baseFreq * ratio * Mathf.Pow(2f, octave);
+                freq = Mathf.Clamp(freq, 800f, 3200f); // no subir infinito
+
+                // Capa principal: ping agudo
+                Next().Play(freq, SynthSFX.SynthType.Sine,
+                    atk: 0.001f, dec: 0.07f, sus: 0f, rel: 0.10f,
+                    vol: 0.36f * vol);
+                // Subarmónico suave para dar cuerpo
+                Next().Play(freq * 0.5f, SynthSFX.SynthType.Sine,
+                    atk: 0.001f, dec: 0.05f, sus: 0f, rel: 0.07f,
+                    vol: 0.14f * vol);
+
+                _coinStep++;
                 break;
             }
 
             // ── MONEDA PREMIUM ────────────────────────────────────────────────
-            // Arpeggio de 5 notas con aceleración = más especial que la moneda normal
             case RunnerClip.CoinPremium:
                 StartCoroutine(PlayPremiumArpeggio(vol));
                 break;
 
-            // ── POWER-UP ──────────────────────────────────────────────────────
-            // FM con sweep ascendente de octava = activación energética
+            // ── POWER-UP (recoger el objeto) ──────────────────────────────────
             case RunnerClip.PowerUp:
             {
-                float f = Vary(440f);
-                Next().Play(f, SynthSFX.SynthType.FM,
-                    atk: 0.01f, dec: 0.45f, sus: 0.15f, rel: 0.35f,
-                    vol: 0.52f * vol,
-                    fmFreq: f * 0.5f, fmIdx: 1.5f,
-                    sweep: true, sweepEnd: f * 2f, sweepDur: 0.45f);
+                float f = Vary(500f);
+                Next().Play(f, SynthSFX.SynthType.Additive,
+                    atk: 0.006f, dec: 0.38f, sus: 0.08f, rel: 0.28f,
+                    vol: 0.48f * vol,
+                    sweep: true, sweepEnd: f * 2.1f, sweepDur: 0.40f);
                 break;
             }
 
-            // ── OBSTÁCULO GOLPEADO ────────────────────────────────────────────
-            // FM muy alto + saw: crujido físico de madera/metal
+            // ── OBSTÁCULO ─────────────────────────────────────────────────────
             case RunnerClip.ObstacleHit:
             {
-                float f = Vary(130f);
+                float f = Vary(145f);
                 Next().Play(f, SynthSFX.SynthType.FM,
-                    atk: 0.003f, dec: 0.22f, sus: 0f, rel: 0.12f,
-                    vol: 0.60f * vol,
-                    fmFreq: f * 2.1f, fmIdx: 5.0f);
+                    atk: 0.002f, dec: 0.18f, sus: 0f, rel: 0.10f,
+                    vol: 0.52f * vol,
+                    fmFreq: f * 2.4f, fmIdx: 5.0f);
                 break;
             }
 
             // ── BARRERA ───────────────────────────────────────────────────────
             case RunnerClip.Object_Barrier:
             {
-                float f = Vary(110f);
+                float f = Vary(270f);
                 Next().Play(f, SynthSFX.SynthType.Square,
-                    atk: 0.003f, dec: 0.18f, sus: 0f, rel: 0.08f,
-                    vol: 0.48f * vol);
+                    atk: 0.002f, dec: 0.12f, sus: 0f, rel: 0.07f,
+                    vol: 0.40f * vol);
                 break;
             }
 
             // ── MISIL ─────────────────────────────────────────────────────────
-            // FM con sweep descendente = proyectil que pasa y se aleja
             case RunnerClip.Object_Missile:
             {
-                float f = Vary(750f);
+                float f = Vary(880f);
                 Next().Play(f, SynthSFX.SynthType.FM,
-                    atk: 0.008f, dec: 0.38f, sus: 0f, rel: 0.25f,
-                    vol: 0.42f * vol,
-                    fmFreq: f * 0.5f, fmIdx: 2.0f,
-                    sweep: true, sweepEnd: 180f, sweepDur: 0.38f);
-                break;
-            }
-
-            // ── IMÁN (looping, llamado cada 0.8s) ────────────────────────────
-            // Wavetable suave con sweep leve = campo magnético pulsante
-            case RunnerClip.Object_Magnet:
-            {
-                float f = Vary(320f, 0.04f);
-                Next().Play(f, SynthSFX.SynthType.Wavetable,
-                    atk: 0.08f, dec: 0.5f, sus: 0.35f, rel: 0.6f,
-                    vol: 0.30f * vol);
-                break;
-            }
-
-            // ── INVENCIBILIDAD (looping) ──────────────────────────────────────
-            // Aditiva brillante con sweep leve = escudo activo, energía
-            case RunnerClip.Object_Invincible:
-            {
-                float f = Vary(660f, 0.04f);
-                Next().Play(f, SynthSFX.SynthType.Additive,
-                    atk: 0.05f, dec: 0.4f, sus: 0.3f, rel: 0.55f,
+                    atk: 0.005f, dec: 0.30f, sus: 0f, rel: 0.18f,
                     vol: 0.38f * vol,
-                    sweep: true, sweepEnd: f * 1.15f, sweepDur: 0.4f);
+                    fmFreq: f * 0.5f, fmIdx: 2.0f,
+                    sweep: true, sweepEnd: 190f, sweepDur: 0.32f);
                 break;
             }
 
-            // ── MULTIPLICADOR x2 (looping) ────────────────────────────────────
-            // FM ligero pulsante = puntuación activa, ritmo de multiplicación
+            // ── OBJETOS CON SONIDO SOSTENIDO ──────────────────────────────────
+            // Estos se manejan con PlayPowerupSound() / StopPowerupSound().
+            // Pero si alguien llama Play() directamente, lo redirigimos.
+            case RunnerClip.Object_Magnet:
+            case RunnerClip.Object_Invincible:
             case RunnerClip.Object_Multiplier:
-            {
-                float f = Vary(550f, 0.04f);
-                Next().Play(f, SynthSFX.SynthType.FM,
-                    atk: 0.03f, dec: 0.35f, sus: 0.25f, rel: 0.50f,
-                    vol: 0.32f * vol,
-                    fmFreq: f * 0.25f, fmIdx: 0.6f);
+                PlayPowerupSound(clip);
                 break;
-            }
 
             // ── UI ────────────────────────────────────────────────────────────
             case RunnerClip.UINavigate:
-                Next().Play(Vary(660f, 0.05f), SynthSFX.SynthType.Sine,
-                    atk: 0.004f, dec: 0.06f, sus: 0f, rel: 0.04f,
-                    vol: 0.20f * vol);
+                Next().Play(Vary(680f, 0.04f), SynthSFX.SynthType.Sine,
+                    atk: 0.002f, dec: 0.050f, sus: 0f, rel: 0.030f,
+                    vol: 0.16f * vol);
                 break;
 
             case RunnerClip.UIConfirm:
-                Next().Play(Vary(900f, 0.05f), SynthSFX.SynthType.Square,
-                    atk: 0.004f, dec: 0.09f, sus: 0f, rel: 0.06f,
-                    vol: 0.22f * vol);
+            {
+                float f = Vary(920f, 0.04f);
+                Next().Play(f, SynthSFX.SynthType.Additive,
+                    atk: 0.002f, dec: 0.09f, sus: 0f, rel: 0.06f,
+                    vol: 0.20f * vol,
+                    sweep: true, sweepEnd: f * 1.18f, sweepDur: 0.09f);
                 break;
+            }
 
             case RunnerClip.UICancel:
-                Next().Play(Vary(420f, 0.05f), SynthSFX.SynthType.Square,
-                    atk: 0.004f, dec: 0.09f, sus: 0f, rel: 0.06f,
-                    vol: 0.20f * vol);
+                Next().Play(Vary(390f, 0.04f), SynthSFX.SynthType.Square,
+                    atk: 0.002f, dec: 0.07f, sus: 0f, rel: 0.04f,
+                    vol: 0.16f * vol);
                 break;
 
             // ── GAME OVER ─────────────────────────────────────────────────────
             case RunnerClip.GameOver:
-                Next().Play(320f, SynthSFX.SynthType.FM,
-                    atk: 0.015f, dec: 1.1f, sus: 0f, rel: 0.9f,
-                    vol: 0.52f * vol,
-                    fmFreq: 160f, fmIdx: 1.8f,
-                    sweep: true, sweepEnd: 95f, sweepDur: 1.3f);
+                Next().Play(270f, SynthSFX.SynthType.FM,
+                    atk: 0.010f, dec: 0.95f, sus: 0f, rel: 0.75f,
+                    vol: 0.48f * vol,
+                    fmFreq: 135f, fmIdx: 1.9f,
+                    sweep: true, sweepEnd: 75f, sweepDur: 1.1f);
                 break;
 
-            // ── GAME START (GO del countdown) ─────────────────────────────────
+            // ── GAME START ────────────────────────────────────────────────────
             case RunnerClip.GameStart:
             {
-                float f = Vary(523f);
+                float f = Vary(540f);
                 Next().Play(f, SynthSFX.SynthType.Additive,
-                    atk: 0.008f, dec: 0.35f, sus: 0.1f, rel: 0.25f,
-                    vol: 0.55f * vol,
-                    sweep: true, sweepEnd: f * 2f, sweepDur: 0.28f);
-                break;
-            }
-        }
-    }
-
-    // ── Sonido looping para consumables ───────────────────────────────────────
-    // Se llama desde LoopSFX cada 0.8s — usa el loopPool separado del sfxPool
-
-    private void TriggerLooping(RunnerClip clip)
-    {
-        if (_loopingSFX == null) return;
-        float vol = sfxVolume * masterVolume;
-
-        switch (clip)
-        {
-            case RunnerClip.Object_Magnet:
-            {
-                float f = Vary(320f, 0.04f);
-                _loopingSFX.Play(f, SynthSFX.SynthType.Wavetable,
-                    atk: 0.08f, dec: 0.5f, sus: 0.35f, rel: 0.6f,
-                    vol: 0.28f * vol);
-                break;
-            }
-            case RunnerClip.Object_Invincible:
-            {
-                float f = Vary(660f, 0.04f);
-                _loopingSFX.Play(f, SynthSFX.SynthType.Additive,
-                    atk: 0.05f, dec: 0.4f, sus: 0.3f, rel: 0.55f,
-                    vol: 0.35f * vol,
-                    sweep: true, sweepEnd: f * 1.15f, sweepDur: 0.4f);
-                break;
-            }
-            case RunnerClip.Object_Multiplier:
-            {
-                float f = Vary(550f, 0.04f);
-                _loopingSFX.Play(f, SynthSFX.SynthType.FM,
-                    atk: 0.03f, dec: 0.35f, sus: 0.25f, rel: 0.50f,
-                    vol: 0.30f * vol,
-                    fmFreq: f * 0.25f, fmIdx: 0.6f);
+                    atk: 0.005f, dec: 0.30f, sus: 0.06f, rel: 0.20f,
+                    vol: 0.50f * vol,
+                    sweep: true, sweepEnd: f * 2.0f, sweepDur: 0.25f);
                 break;
             }
         }
@@ -410,51 +432,46 @@ public class RunnerAudioManager : MonoBehaviour
 
     // ── Secuencias ────────────────────────────────────────────────────────────
 
-    // Muerte: acorde descendente Am → colapso total
     private IEnumerator PlayDeathSequence(float vol)
     {
-        // Primera nota: impacto grave
-        Next().Play(220f, SynthSFX.SynthType.FM,
-            atk: 0.005f, dec: 0.5f, sus: 0f, rel: 0.4f,
-            vol: 0.65f * vol,
-            fmFreq: 110f, fmIdx: 2.5f,
-            sweep: true, sweepEnd: 55f, sweepDur: 0.6f);
+        Next().Play(230f, SynthSFX.SynthType.FM,
+            atk: 0.003f, dec: 0.42f, sus: 0f, rel: 0.32f,
+            vol: 0.58f * vol,
+            fmFreq: 115f, fmIdx: 2.7f,
+            sweep: true, sweepEnd: 55f, sweepDur: 0.52f);
 
-        yield return new WaitForSeconds(0.15f);
+        yield return new WaitForSeconds(0.13f);
 
-        // Segunda nota: más grave aún
-        Next().Play(165f, SynthSFX.SynthType.FM,
-            atk: 0.005f, dec: 0.6f, sus: 0f, rel: 0.5f,
-            vol: 0.55f * vol,
-            fmFreq: 82f, fmIdx: 2.0f,
-            sweep: true, sweepEnd: 40f, sweepDur: 0.7f);
+        Next().Play(172f, SynthSFX.SynthType.FM,
+            atk: 0.003f, dec: 0.52f, sus: 0f, rel: 0.42f,
+            vol: 0.48f * vol,
+            fmFreq: 86f, fmIdx: 2.1f,
+            sweep: true, sweepEnd: 42f, sweepDur: 0.62f);
 
-        yield return new WaitForSeconds(0.15f);
+        yield return new WaitForSeconds(0.13f);
 
-        // Tercera nota: colapso final
-        Next().Play(110f, SynthSFX.SynthType.Saw,
-            atk: 0.005f, dec: 0.8f, sus: 0f, rel: 0.6f,
-            vol: 0.50f * vol,
-            sweep: true, sweepEnd: 30f, sweepDur: 0.9f);
+        Next().Play(115f, SynthSFX.SynthType.Saw,
+            atk: 0.003f, dec: 0.70f, sus: 0f, rel: 0.52f,
+            vol: 0.42f * vol,
+            sweep: true, sweepEnd: 28f, sweepDur: 0.82f);
     }
 
-    // Moneda premium: 5 notas con aceleración + sweep final
     private IEnumerator PlayPremiumArpeggio(float vol)
     {
-        float[] freqs   = { 523f, 659f, 784f, 987f, 1047f };
-        float[] delays  = { 0.09f, 0.08f, 0.07f, 0.06f, 0f };
+        // C6 E6 G6 C7 — arpegio de Do mayor octava alta, notas claras
+        float[] freqs  = { 1046.5f, 1318.5f, 1568.0f, 2093.0f };
+        float[] delays = { 0.07f, 0.07f, 0.06f, 0f };
 
         for (int i = 0; i < freqs.Length; i++)
         {
-            float f = Vary(freqs[i], 0.04f);
+            float f = Vary(freqs[i], 0.025f);
             bool isLast = i == freqs.Length - 1;
-            Next().Play(f, SynthSFX.SynthType.Additive,
-                atk: 0.004f,
-                dec: isLast ? 0.5f : 0.18f,
-                sus: isLast ? 0.1f : 0f,
-                rel: isLast ? 0.4f : 0.12f,
-                vol: (0.45f + i * 0.03f) * vol,
-                sweep: isLast, sweepEnd: f * 1.3f, sweepDur: 0.4f);
+            Next().Play(f, SynthSFX.SynthType.Sine,
+                atk: 0.001f,
+                dec: isLast ? 0.42f : 0.12f,
+                sus: 0f,
+                rel: isLast ? 0.32f : 0.09f,
+                vol: (0.30f + i * 0.04f) * vol);
 
             if (delays[i] > 0f)
                 yield return new WaitForSeconds(delays[i]);

@@ -1837,6 +1837,11 @@ PrefabInstance:
       propertyPath: m_audioClip
       value: 
       objectReference: {fileID: 0}
+    - target: {fileID: 114322282601092784, guid: fc9855a6b2a67364ebc0db28e7bbc98b,
+        type: 3}
+      propertyPath: stems.Array.data[0].clip
+      value: 
+      objectReference: {fileID: 0}
     m_RemovedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: fc9855a6b2a67364ebc0db28e7bbc98b, type: 3}
 --- !u!1 &170413742
@@ -8912,6 +8917,157 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 781485302}
   m_CullTransparentMesh: 0
+--- !u!1 &782199358
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 782199361}
+  - component: {fileID: 782199360}
+  - component: {fileID: 782199359}
+  m_Layer: 0
+  m_Name: Drums
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &782199359
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 782199358}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b8a0438f379557b43ab82f3009a3cfc6, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  masterVolume: 0.15
+  kickStartFreq: 80
+  kickEndFreq: 40
+  kickDecay: 0.2
+  kickPitchDecay: 0.08
+  snareDecay: 0.18
+  snareToneFreq: 200
+  snareToneMix: 0.3
+  hihatDecay: 0.05
+  hihatCutoff: 0.6
+--- !u!82 &782199360
+AudioSource:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 782199358}
+  m_Enabled: 1
+  serializedVersion: 4
+  OutputAudioMixerGroup: {fileID: 0}
+  m_audioClip: {fileID: 0}
+  m_PlayOnAwake: 1
+  m_Volume: 1
+  m_Pitch: 1
+  Loop: 0
+  Mute: 0
+  Spatialize: 0
+  SpatializePostEffects: 0
+  Priority: 128
+  DopplerLevel: 1
+  MinDistance: 1
+  MaxDistance: 500
+  Pan2D: 0
+  rolloffMode: 0
+  BypassEffects: 0
+  BypassListenerEffects: 0
+  BypassReverbZones: 0
+  rolloffCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    - serializedVersion: 3
+      time: 1
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  panLevelCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  spreadCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  reverbZoneMixCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+--- !u!4 &782199361
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 782199358}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1757452195}
+  m_RootOrder: 10
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &788409693
 GameObject:
   m_ObjectHideFlags: 0
@@ -10719,7 +10875,7 @@ MonoBehaviour:
   tutorialPrompt: {fileID: 610653253}
   skyMeshFilter: {fileID: 1222759691}
   UIGroundFilter: {fileID: 517316206}
-  menuTheme: {fileID: 8300000, guid: 1588137430bfbab4b9a00ba3b220b82b, type: 3}
+  menuTheme: {fileID: 0}
   consumableIcon: {fileID: 11439736, guid: 0c5f0793b82536342bd64bc3e3fdee8a, type: 3}
 --- !u!1 &878427076
 GameObject:
@@ -23805,10 +23961,8 @@ GameObject:
   m_Component:
   - component: {fileID: 1757452195}
   - component: {fileID: 1757452194}
-  - component: {fileID: 1757452193}
   - component: {fileID: 1757452198}
   - component: {fileID: 1757452197}
-  - component: {fileID: 1757452196}
   m_Layer: 0
   m_Name: RunnerAudio
   m_TagString: Untagged
@@ -23816,28 +23970,6 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &1757452193
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1757452192}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: b8a0438f379557b43ab82f3009a3cfc6, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  masterVolume: 0.15
-  kickStartFreq: 80
-  kickEndFreq: 40
-  kickDecay: 0.2
-  kickPitchDecay: 0.08
-  snareDecay: 0.18
-  snareToneFreq: 200
-  snareToneMix: 0.3
-  hihatDecay: 0.05
-  hihatCutoff: 0.6
 --- !u!82 &1757452194
 AudioSource:
   m_ObjectHideFlags: 0
@@ -23956,31 +24088,10 @@ Transform:
   - {fileID: 1359465725}
   - {fileID: 463877197}
   - {fileID: 188775364}
+  - {fileID: 782199361}
   m_Father: {fileID: 0}
   m_RootOrder: 9
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &1757452196
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1757452192}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: b8a0438f379557b43ab82f3009a3cfc6, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  masterVolume: 0.15
-  kickStartFreq: 80
-  kickEndFreq: 40
-  kickDecay: 0.2
-  kickPitchDecay: 0.08
-  snareDecay: 0.18
-  snareToneFreq: 200
-  snareToneMix: 0.3
-  hihatDecay: 0.05
-  hihatCutoff: 0.6
 --- !u!114 &1757452197
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -24000,7 +24111,8 @@ MonoBehaviour:
   - {fileID: 1386836051}
   - {fileID: 1743670297}
   - {fileID: 810818491}
-  loopPool: []
+  slideSlot: {fileID: 0}
+  powerupSlot: {fileID: 0}
   synthAmbient: {fileID: 1757452198}
   sfxVolume: 1
   masterVolume: 1
@@ -24016,21 +24128,17 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 647e8030618a2aa46a535e4248a1d4d9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  arpPool:
-  - {fileID: 1449361342}
-  - {fileID: 1359465723}
-  - {fileID: 463877195}
-  - {fileID: 188775362}
-  drums: {fileID: 1757452193}
-  bpmMenu: 100
+  drums: {fileID: 782199359}
   bpmGame: 125
-  masterVolume: 0.45
-  droneVolume: 0.15
-  arpVolume: 0.25
+  bpmMenu: 100
+  masterVolume: 0.815
+  melodyVolume: 0.814
   bassVolume: 0.2
-  glideTime: 2
-  lfoFreq: 0.05
-  lfoDepth: 0.2
+  padVolume: 0.1
+  playMelody: 1
+  playBass: 1
+  playPad: 1
+  playDrums: 1
 --- !u!1 &1763834837
 GameObject:
   m_ObjectHideFlags: 0
