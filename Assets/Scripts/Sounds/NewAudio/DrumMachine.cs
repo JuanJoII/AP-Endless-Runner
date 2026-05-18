@@ -193,4 +193,41 @@ public class DrumMachine : MonoBehaviour
             yield return new WaitForSeconds(triplet);
         }
     }
+
+    /// <summary>Patrón funk/blues callejero: kick en 1 y 3, snare en 2 y 4 + offbeat ghost.</summary>
+    public IEnumerator PlayPattern_Funk(float bpm, int bars = 1)
+    {
+        float beat = 60f / bpm;
+        float half = beat * 0.5f;
+
+        for (int b = 0; b < bars * 4; b++)
+        {
+            int pos = b % 4;
+
+            if (pos == 0)
+            {
+                Kick();
+                HiHat();
+            }
+            else if (pos == 1)
+            {
+                Snare();
+                HiHat();
+            }
+            else if (pos == 2)
+            {
+                Kick();
+                HiHat();
+            }
+            else
+            {
+                Snare();
+                HiHat();
+            }
+
+            yield return new WaitForSeconds(half);
+            HiHat();
+            yield return new WaitForSeconds(half);
+        }
+    }
 }

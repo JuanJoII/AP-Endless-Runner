@@ -2,19 +2,14 @@ using System.Collections;
 using UnityEngine;
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// RunnerSynthAmbient v4 — Música procedural energética estilo Geometry Dash.
+// RunnerSynthAmbient v5 — C minor blues, vibe funk callejero
 //
-// CAMBIOS vs v3:
-//   • Melodía de 32 notas con ritmo mixto (negras + corcheas + semicorcheas)
-//     → frase larga que sube y baja, muy euforica, no monótona
-//   • Contramelodía en 2do ciclo (sensación de estrofa / coro)
-//   • Bajo con walking bass activo: nota por beat + octavas en corcheas
-//   • Pad con 4 voces y chorus (2 osciladores desafinados ±3 cents)
-//   • Melodía con 5 armónicos (más brillante y llena)
-//   • Bajo con 2do armónico (más gordo y redondo)
-//   • Modo Menu: groove lento tipo lo-fi, acordes que respiran
-//   • BPM del juego subido a 135 para más energía
-//   • Reverb sintético (comb filter muy simple) en el pad
+// BASADO EN PROPUESTA DEL USUARIO:
+//   • Melodía: C minor blues (C4 Eb4 F4 G4 | Bb4 G4 F4 C4 | C4 Eb4 F4 F#4 G4 | C5 G4 Eb4 C4)
+//   • Blue note F#4 en compás 3 para el "toque sucio jazz"
+//   • Bajo square bass funk siguiendo progresión Cm7 | Fm7 | G7 | Cm7
+//   • Bateria: kick/snare/hihat pattern funk
+//   • Loop de 4 compases a 130 BPM
 // ═══════════════════════════════════════════════════════════════════════════════
 
 public enum RunnerMusicMode { Menu, Game, GameOver }
@@ -26,13 +21,13 @@ public class RunnerSynthAmbient : MonoBehaviour
     public DrumMachine drums;
 
     [Header("Tempo")]
-    [Range(110f, 175f)] public float bpmGame = 135f;
+    [Range(110f, 175f)] public float bpmGame = 130f;
     [Range(70f,  100f)] public float bpmMenu = 80f;
 
     [Header("Volumen por capa")]
     [Range(0f, 1f)] public float masterVolume  = 0.50f;
     [Range(0f, 1f)] public float melodyVolume  = 0.28f;
-    [Range(0f, 1f)] public float bassVolume    = 0.20f;
+    [Range(0f, 1f)] public float bassVolume    = 0.32f;
     [Range(0f, 1f)] public float padVolume     = 0.12f;
 
     [Header("Capas activas")]
@@ -42,40 +37,53 @@ public class RunnerSynthAmbient : MonoBehaviour
     public bool playDrums  = true;
 
     // =========================================================================
-    // MELODÍA GAME — Do mayor, eufórica, 32 notas, ritmo mixto
+    // MELODÍA GAME — C minor blues, 130 BPM, proposal exacta
     //
-    // Compases 1-2 (frase A — subida):
-    //   C5  E5  G5  B5  | A5  G5  E5  G5  | F5  A5  C6  A5  | G5  E5  D5  E5
-    // Compases 3-4 (frase B — clímax + bajada):
-    //   G5  B5  D6  C6  | B5  A5  G5  F5  | E5  G5  A5  G5  | F5  E5  D5  C5
+    // C1: C4 Eb4 | F4  G4  -  |
+    // C2: Bb4 G4 | F4  C4  -  |
+    // C3: C4 Eb4 F4 F#4 | G4  -  -  -  | (blue note F#4!)
+    // C4: C5 G4 | Eb4 C4 -  -  |
     // =========================================================================
 
     private readonly float[] _gameMelody = new float[]
     {
-        // Frase A — ascenso eufórico
-        523.25f, 659.25f, 783.99f, 987.77f,   // C5 E5 G5 B5
-        880.00f, 783.99f, 659.25f, 783.99f,   // A5 G5 E5 G5
-        698.46f, 880.00f, 1046.5f, 880.00f,   // F5 A5 C6 A5
-        783.99f, 659.25f, 587.33f, 659.25f,   // G5 E5 D5 E5
-        // Frase B — clímax y regreso al hogar
-        783.99f, 987.77f, 1174.7f, 1046.5f,  // G5 B5 D6 C6
-        987.77f, 880.00f, 783.99f, 698.46f,  // B5 A5 G5 F5
-        659.25f, 783.99f, 880.00f, 783.99f,  // E5 G5 A5 G5
-        698.46f, 659.25f, 587.33f, 523.25f,  // F5 E5 D5 C5
+        // Compás 1 — trote inicial
+        261.63f,   // C4 (corchea)
+        311.13f,   // Eb4 (corchea)
+        349.23f,   // F4 (negra)
+        392.00f,   // G4 (negra)
+        0f,        // silencio (negra)
+        // Compás 2 — esquivando obstáculos
+        466.16f,   // Bb4 (corchea)
+        392.00f,   // G4 (corchea)
+        349.23f,   // F4 (negra)
+        261.63f,   // C4 (negra)
+        0f,        // silencio (negra)
+        // Compás 3 — blue note + blanca
+        261.63f,   // C4 (corchea)
+        311.13f,   // Eb4 (corchea)
+        349.23f,   // F4 (corchea)
+        369.99f,   // F#4 (corchea) — blue note!
+        392.00f,   // G4 (blanca)
+        // Compás 4 — salto y aterrizaje
+        523.25f,   // C5 (corchea)
+        392.00f,   // G4 (corchea)
+        311.13f,   // Eb4 (negra)
+        261.63f,   // C4 (negra)
+        0f,        // silencio (negra)
     };
 
-    // Ritmo: mezcla de negras (1), corcheas (0.5) y algunos acentos (0.75)
-    // El patrón de duración hace que la melodía "baile" en lugar de marchar
+    // 20 notas (2+2+2+1 silencias = 20 positions)
     private readonly float[] _gameMelodyDur = new float[]
     {
-        0.5f, 0.5f, 0.5f, 0.75f,   // frase A, c1
-        0.5f, 0.5f, 0.5f, 0.75f,   // frase A, c2
-        0.5f, 0.5f, 0.5f, 0.75f,   // frase A, c3
-        0.5f, 0.5f, 0.5f, 0.75f,   // frase A, c4
-        0.5f, 0.5f, 0.5f, 0.75f,   // frase B, c1
-        0.5f, 0.5f, 0.5f, 0.5f,    // frase B, c2
-        0.5f, 0.5f, 0.5f, 0.5f,    // frase B, c3
-        0.75f, 0.5f, 0.5f, 1.0f,   // frase B, c4 — nota final larga
+        // C1: 2 corcheas + 2 negras + silencio
+        0.5f, 0.5f, 1.0f, 1.0f, 1.0f,
+        // C2: 2 corcheas + 2 negras + silencio
+        0.5f, 0.5f, 1.0f, 1.0f, 1.0f,
+        // C3: 4 corcheas + 1 blanca
+        0.5f, 0.5f, 0.5f, 0.5f, 2.0f,
+        // C4: 2 corcheas + 2 negras + silencio
+        0.5f, 0.5f, 1.0f, 1.0f, 1.0f,
     };
 
     // Melodía Menu — más suave, tipo lo-fi chill
@@ -91,23 +99,23 @@ public class RunnerSynthAmbient : MonoBehaviour
     };
 
     // =========================================================================
-    // BAJO GAME — walking bass activo, I-V-vi-IV con variación
-    // Una nota por beat (4 notas por compás), octavas alternadas
+    // BAJO GAME — C minor blues, square bass funk
+    // I=Cm7 | IV=Fm7 | V=G7 | I=Cm7
+    // Square wave para ese tono "saxofón/trompeta funk"
     //
-    // Compás I (C):  C2  E2  G2  E2
-    // Compás V (G):  G2  B2  D3  B2
-    // Compás vi(Am): A1  C2  E2  C2
-    // Compás IV(F):  F2  A2  C3  A2
+    // C1 (Cm):  C2  C2  Eb2  G2
+    // C2 (Fm):  F1  F1  Ab1  C2
+    // C3 (G7):  G1  G1  Bb1  D2
+    // C4 (Cm):  C2  C2  Eb2  G2
     // =========================================================================
 
     private readonly float[] _gameBassNotes = new float[]
     {
-        65.41f,  82.41f,  98.00f,  82.41f,   // C2 E2 G2 E2
-        98.00f,  123.47f, 146.83f, 123.47f,  // G2 B2 D3 B2
-        55.00f,  65.41f,  82.41f,  65.41f,   // A1 C2 E2 C2
-        87.31f,  110.00f, 130.81f, 110.00f,  // F2 A2 C3 A2
+        65.41f,   65.41f,   77.78f,   98.00f,   // Cm: C2 C2 Eb2 G2
+        43.65f,   43.65f,   51.91f,   65.41f,   // Fm: F1 F1 Ab1 C2
+        49.00f,   49.00f,   58.27f,   73.42f,   // G7: G1 G1 Bb1 D2
+        65.41f,   65.41f,   77.78f,   98.00f,   // Cm: C2 C2 Eb2 G2
     };
-    // Duración de cada nota del bajo en beats
     private readonly float[] _gameBassDur = new float[]
     {
         1f, 1f, 1f, 1f,
@@ -128,17 +136,17 @@ public class RunnerSynthAmbient : MonoBehaviour
     };
 
     // =========================================================================
-    // PAD GAME — 4 voces por acorde (voicing más rico)
-    // I=C: C3 E3 G3 B3  |  V=G: G3 B3 D4 F#4
-    // vi=Am: A2 C3 E3 G3 | IV=F: F3 A3 C4 E4
+    // PAD GAME — C minor blues, acordes menores con 7ma
+    // I=Cm7: C3 Eb3 G3 Bb3  |  IV=Fm7: F3 Ab3 C4 Eb4
+    // V=G7: G2 Bb2 D3 F3    |  I=Cm7: C3 Eb3 G3 Bb3
     // =========================================================================
 
     private readonly float[][] _gamePad = new float[][]
     {
-        new[] { 130.81f, 164.81f, 196.00f, 246.94f },  // Cmaj7
-        new[] { 196.00f, 246.94f, 293.66f, 369.99f },  // Gmaj7 (F#4 ≈ 370)
-        new[] { 110.00f, 130.81f, 164.81f, 196.00f },  // Am7
-        new[] { 174.61f, 220.00f, 261.63f, 329.63f },  // Fmaj7
+        new[] { 130.81f, 155.56f, 196.00f, 233.08f },  // Cm7: C Eb G Bb
+        new[] { 174.61f, 207.65f, 261.63f, 311.13f },  // Fm7: F Ab C Eb
+        new[] { 98.00f,  116.54f, 146.83f, 174.61f },  // G7: G Bb D F
+        new[] { 130.81f, 155.56f, 196.00f, 233.08f },  // Cm7: C Eb G Bb
     };
 
     // ── Estado interno ────────────────────────────────────────────────────────
@@ -156,8 +164,8 @@ public class RunnerSynthAmbient : MonoBehaviour
     private double _bPhase    = 0.0;
     private double _bFreq     = 65.41;
     private float  _bEnv      = 0f;
-    private float  _bAttack   = 0.004f;
-    private float  _bRelease  = 0.18f;
+    private float  _bAttack   = 0.003f;
+    private float  _bRelease  = 0.12f;
 
     // ── Pad — 4 voces + chorus (2 osciladores desafinados ±4 cents) ───────────
     // _pPhase[0..3] = voces principales, _pPhase[4..7] = coro desafinado
@@ -275,12 +283,14 @@ public class RunnerSynthAmbient : MonoBehaviour
 
                     if (_mode == RunnerMusicMode.Game && playDrums)
                     {
-                        drums.masterVolume  = 0.20f;
-                        drums.kickStartFreq = 90f;
-                        drums.kickEndFreq   = 32f;
-                        drums.kickDecay     = 0.14f;
-                        drums.hihatDecay    = 0.025f;
-                        drums.StartCoroutine(drums.PlayPattern_Basic(bpmGame, 9999));
+                        drums.masterVolume  = 0.22f;
+                        drums.kickStartFreq = 85f;
+                        drums.kickEndFreq   = 35f;
+                        drums.kickDecay     = 0.12f;
+                        drums.snareDecay    = 0.15f;
+                        drums.snareToneFreq = 180f;
+                        drums.hihatDecay    = 0.03f;
+                        drums.StartCoroutine(drums.PlayPattern_Funk(bpmGame, 9999));
                     }
                     else if (_mode == RunnerMusicMode.Menu && playDrums)
                     {
@@ -467,7 +477,7 @@ public class RunnerSynthAmbient : MonoBehaviour
                 melSample = (m1 + m3 + m5 + m7 + m9) / 1.787f * _mEnv * melodyVolume;
             }
 
-            // ── BAJO — diente de sierra + 2do armónico (gordo) ─────────────────
+            // ── BAJO — square wave (saxofón/trompeta funk) + saw sub ──────────────
             float basSample = 0f;
             if (playBass)
             {
@@ -475,17 +485,19 @@ public class RunnerSynthAmbient : MonoBehaviour
                 float alpha = bOn ? bAtkAlpha : bRelAlpha;
                 _bEnv += (bTgt - _bEnv) * alpha;
 
-                // Shimmer muy sutil en la frecuencia del bajo
                 double bFreqMod = _bFreq * (1.0 + lfo2Val);
                 _bPhase += twoPi * bFreqMod / _sr;
                 if (_bPhase > twoPi) _bPhase -= twoPi;
 
-                float sawRaw  = (float)((_bPhase / twoPi) * 2.0 - 1.0);
-                float sin1    = (float)System.Math.Sin(_bPhase);
-                float sin2    = (float)System.Math.Sin(_bPhase * 2) * 0.5f;
+                // Square wave principal (fuerte, brillante)
+                float squareRaw = (float)System.Math.Sign(System.Math.Sin(_bPhase));
+                // Saw sub para grosor
+                float sawSub  = (float)((_bPhase / twoPi) * 2.0 - 1.0);
+                // Segundo armónico para calidez
+                float sin2    = (float)System.Math.Sin(_bPhase * 2) * 0.3f;
 
-                // Mezcla: saw da presencia, senos dan calidez
-                basSample = (sawRaw * 0.5f + sin1 * 0.35f + sin2 * 0.15f) * _bEnv * bassVolume;
+                // Mezcla: square da punch, saw sub da cuerpo, sin2 da calidez
+                basSample = (squareRaw * 0.55f + sawSub * 0.25f + sin2 * 0.20f) * _bEnv * bassVolume;
             }
 
             // ── PAD — 4 voces seno + chorus de 4 voces desafinadas ───────────────

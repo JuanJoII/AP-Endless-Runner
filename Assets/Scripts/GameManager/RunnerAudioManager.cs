@@ -36,6 +36,7 @@ public enum RunnerClip
     Object_Barrier, Object_Missile,
     Object_Magnet, Object_Invincible, Object_Multiplier,
     UINavigate, UIConfirm, UICancel, GameOver, GameStart,
+    UIPurchase, UIError, Pause,
 }
 
 [RequireComponent(typeof(AudioSource))]
@@ -96,7 +97,7 @@ public class RunnerAudioManager : MonoBehaviour
     {
         SynthSFX sfx = sfxPool[_poolIdx % sfxPool.Length];
         _poolIdx++;
-        if (sfx.isActive) sfx.ForceStop();
+        if (sfx.isActive && sfx != slideSlot && sfx != powerupSlot) sfx.ForceStop();
         return sfx;
     }
 
@@ -117,6 +118,7 @@ public class RunnerAudioManager : MonoBehaviour
 
     /// <summary>
     /// Llama esto cuando el personaje empieza a deslizarse.
+    /// Sonido de "whoosh" con FM synthesis — aire + fricción metálica.
     /// El sonido se sostiene hasta que llames StopSlide().
     /// </summary>
     public void PlaySlide()
@@ -126,20 +128,23 @@ public class RunnerAudioManager : MonoBehaviour
 
         float vol = sfxVolume * masterVolume;
 
-        // Sweep de 550Hz → 140Hz en 0.35s: fricción que baja al agacharse
-        // Sine suave — no FM agresivo, no duele los oídos
-        // holdUntilNoteOff=true → se queda en sustain hasta StopSlide()
+        // FM synthesis: carrier square → sweep down to 70Hz (grave de slide)
+        // Modulator: 280Hz con index 5.5 → sidebands metálicos/aireados tipo whoosh
+        // Attack rápido, sustain largo, release suave
+        // Más volumen y decay para asegurar que siempre se escuche completo
         slideSlot.Play(
-            freq: 550f,
-            type: SynthSFX.SynthType.Sine,
-            atk:  0.015f,
-            dec:  0.30f,
-            sus:  0.08f,   // sustain bajo pero audible
-            rel:  0.25f,
-            vol:  0.35f * vol,
+            freq: 250f,
+            type: SynthSFX.SynthType.FM,
+            atk:  0.005f,
+            dec:  0.40f,
+            sus:  0.45f,
+            rel:  0.30f,
+            vol:  0.65f * vol,
+            fmFreq: 280f,
+            fmIdx:  5.5f,
             sweep: true,
-            sweepEnd: 140f,
-            sweepDur: 0.35f,
+            sweepEnd: 65f,
+            sweepDur: 0.50f,
             holdUntilNoteOff: true
         );
     }
@@ -249,9 +254,6 @@ public class RunnerAudioManager : MonoBehaviour
             }
 
             // ── SLIDE — redirigido a PlaySlide() ──────────────────────────────
-            // El slide ya no se dispara desde Play(RunnerClip.Slide).
-            // El CharacterInputController debe llamar PlaySlide()/StopSlide().
-            // Este case queda como fallback por si algo llama Play(Slide).
             case RunnerClip.Slide:
                 PlaySlide();
                 break;
@@ -297,33 +299,20 @@ public class RunnerAudioManager : MonoBehaviour
                 StartCoroutine(PlayDeathSequence(vol));
                 break;
 
-            // ── MONEDA / HUESO DE PESCADO ─────────────────────────────────────
-            // Arpeggio acumulativo: sube por la escala pentatónica con cada
-            // recolección consecutiva. Se resetea si pasan más de 0.5s.
+            // ── MONEDA ──────────────────────────────────────────────────────────────
+            // Sonido simple y corto: ping agudo metálico sin arpeggio
             case RunnerClip.Coin:
             {
-                // Resetear si pasó demasiado tiempo desde la última moneda
-                if (Time.time - _lastCoinTime > COIN_RESET_TIME)
-                    _coinStep = 0;
-                _lastCoinTime = Time.time;
-
-                float baseFreq = 1100f; // C6 como raíz
-                float ratio    = s_CoinScale[_coinStep % s_CoinScale.Length];
-                // Si llegamos al final de la escala, duplicar la octava base
-                int octave     = _coinStep / s_CoinScale.Length;
-                float freq     = baseFreq * ratio * Mathf.Pow(2f, octave);
-                freq = Mathf.Clamp(freq, 800f, 3200f); // no subir infinito
-
-                // Capa principal: ping agudo
-                Next().Play(freq, SynthSFX.SynthType.Sine,
-                    atk: 0.001f, dec: 0.07f, sus: 0f, rel: 0.10f,
-                    vol: 0.36f * vol);
-                // Subarmónico suave para dar cuerpo
-                Next().Play(freq * 0.5f, SynthSFX.SynthType.Sine,
-                    atk: 0.001f, dec: 0.05f, sus: 0f, rel: 0.07f,
-                    vol: 0.14f * vol);
-
-                _coinStep++;
+                float f = Vary(2200f, 0.03f);
+                SynthSFX coinSfx = Next();
+                coinSfx.numberOfHarmonics = 4;
+                coinSfx.harmonicAmplitudes = new float[] { 1f, 0.4f, 0.2f, 0.1f, 0f, 0f, 0f, 0f, 0f, 0f };
+                coinSfx.Play(f, SynthSFX.SynthType.Additive,
+                    atk: 0.001f, dec: 0.06f, sus: 0f, rel: 0.08f,
+                    vol: 0.30f * vol);
+                Next().Play(f * 2.756f, SynthSFX.SynthType.Sine,
+                    atk: 0.001f, dec: 0.04f, sus: 0f, rel: 0.05f,
+                    vol: 0.10f * vol);
                 break;
             }
 
@@ -408,6 +397,23 @@ public class RunnerAudioManager : MonoBehaviour
                     vol: 0.16f * vol);
                 break;
 
+            case RunnerClip.UIPurchase:
+                StartCoroutine(PlayPurchaseSequence(vol));
+                break;
+
+            case RunnerClip.UIError:
+                Next().Play(Vary(120f, 0.02f), SynthSFX.SynthType.FM,
+                    atk: 0.005f, dec: 0.25f, sus: 0f, rel: 0.15f,
+                    vol: 0.25f * vol,
+                    fmFreq: 127f, fmIdx: 8.0f);
+                break;
+
+            case RunnerClip.Pause:
+                Next().Play(Vary(440f, 0.02f), SynthSFX.SynthType.Sine,
+                    atk: 0.005f, dec: 0.15f, sus: 0f, rel: 0.10f,
+                    vol: 0.20f * vol);
+                break;
+
             // ── GAME OVER ─────────────────────────────────────────────────────
             case RunnerClip.GameOver:
                 Next().Play(270f, SynthSFX.SynthType.FM,
@@ -458,7 +464,6 @@ public class RunnerAudioManager : MonoBehaviour
 
     private IEnumerator PlayPremiumArpeggio(float vol)
     {
-        // C6 E6 G6 C7 — arpegio de Do mayor octava alta, notas claras
         float[] freqs  = { 1046.5f, 1318.5f, 1568.0f, 2093.0f };
         float[] delays = { 0.07f, 0.07f, 0.06f, 0f };
 
@@ -472,6 +477,29 @@ public class RunnerAudioManager : MonoBehaviour
                 sus: 0f,
                 rel: isLast ? 0.32f : 0.09f,
                 vol: (0.30f + i * 0.04f) * vol);
+
+            if (delays[i] > 0f)
+                yield return new WaitForSeconds(delays[i]);
+        }
+    }
+
+    private IEnumerator PlayPurchaseSequence(float vol)
+    {
+        float[] freqs = { 1046.5f, 1318.5f, 1568.0f };
+        float[] delays = { 0.08f, 0.08f, 0f };
+
+        for (int i = 0; i < freqs.Length; i++)
+        {
+            float f = Vary(freqs[i], 0.02f);
+            SynthSFX sfx = Next();
+            sfx.numberOfHarmonics = 4;
+            sfx.harmonicAmplitudes = new float[] { 1f, 0.5f, 0.25f, 0.12f, 0f, 0f, 0f, 0f, 0f, 0f };
+            sfx.Play(f, SynthSFX.SynthType.Additive,
+                atk: 0.001f,
+                dec: i == freqs.Length - 1 ? 0.25f : 0.07f,
+                sus: 0f,
+                rel: i == freqs.Length - 1 ? 0.20f : 0.06f,
+                vol: (0.22f + i * 0.05f) * vol);
 
             if (delays[i] > 0f)
                 yield return new WaitForSeconds(delays[i]);

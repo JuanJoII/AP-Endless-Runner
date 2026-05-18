@@ -362,7 +362,7 @@ public class CharacterInputController : MonoBehaviour
 			character.animator.SetFloat(s_JumpingSpeedHash, animSpeed);
 			character.animator.SetBool(s_SlidingHash, true);
 			if (RunnerAudioManager.instance != null)
-				RunnerAudioManager.instance.Play(RunnerClip.Slide);
+				RunnerAudioManager.instance.PlaySlide();
 			m_Sliding = true;
 
 			characterCollider.Slide(true);
@@ -374,6 +374,8 @@ public class CharacterInputController : MonoBehaviour
 		if (m_Sliding)
 		{
 			character.animator.SetBool(s_SlidingHash, false);
+			if (RunnerAudioManager.instance != null)
+				RunnerAudioManager.instance.StopSlide();
 			m_Sliding = false;
 
 			characterCollider.Slide(false);
