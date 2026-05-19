@@ -208,6 +208,10 @@ public class RunnerSynthAmbient : MonoBehaviour
     private volatile bool  _padNoteOn       = false;
     private volatile float _globalAmpTarget = 0f;
     private volatile float _bpmRatio        = 1f; // para ajuste dinámico de velocidad
+    private float _currentBpm = 130f;  // BPM en tiempo real
+    private float _minBpm     = 110f;  // BPM mínimo (velocidad 0)
+    private float _maxBpm     = 155f;  // BPM máximo (velocidad 1)
+    private float _lastDrumBpm = 130f;
 
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -239,8 +243,11 @@ public class RunnerSynthAmbient : MonoBehaviour
 
     public void UpdateSpeed(float speedRatio)
     {
-        // Sube el BPM ligeramente con la velocidad (hasta +8%)
-        _bpmRatio = 1f + Mathf.Clamp01(speedRatio) * 0.08f;
+        float targetBpm = Mathf.Lerp(_minBpm, _maxBpm, speedRatio);
+        _currentBpm     = Mathf.MoveTowards(_currentBpm, targetBpm, Time.deltaTime * 8f);
+
+        if (drums != null)
+            drums.currentBpm = _currentBpm;
     }
 
     public void StartAmbient()
@@ -277,8 +284,6 @@ public class RunnerSynthAmbient : MonoBehaviour
 
                 if (drums != null)
                 {
-                    // IMPORTANTE: llamar StopAllCoroutines en el DrumMachine,
-                    // NO en este MonoBehaviour — de lo contrario MusicLoop se mata a sí mismo.
                     drums.StopAllCoroutines();
 
                     if (_mode == RunnerMusicMode.Game && playDrums)
@@ -305,34 +310,35 @@ public class RunnerSynthAmbient : MonoBehaviour
                     }
                 }
 
+                // Inicializar _currentBpm al cambiar de modo
+                _currentBpm = (_mode == RunnerMusicMode.Game) ? bpmGame : bpmMenu;
                 _globalAmpTarget = (_mode == RunnerMusicMode.GameOver) ? 0.25f : 1f;
             }
 
             // ── GAME OVER ─────────────────────────────────────────────────────
             if (_mode == RunnerMusicMode.GameOver)
             {
-                // Pad Am con cuarta suspendida, descendente y triste
                 SetPad(110.00f, 146.83f, 164.81f, 196.00f);
-                yield return new WaitForSeconds(4f);
+                yield return StartCoroutine(WaitBeats(4f));
                 continue;
             }
 
             // ── GAME / MENU ───────────────────────────────────────────────────
-            bool isGame    = (_mode == RunnerMusicMode.Game);
-            float bpm      = isGame ? bpmGame : bpmMenu;
-            float beat     = 60f / bpm;
+            bool isGame = (_mode == RunnerMusicMode.Game);
 
-            float[] melody    = isGame ? _gameMelody     : _menuMelody;
-            float[] melDur    = isGame ? _gameMelodyDur  : _menuMelodyDur;
-            float[] bassNotes = isGame ? _gameBassNotes  : _menuBassNotes;
-            float[] bassDur   = isGame ? _gameBassDur    : _menuBassDur;
-            float[][] pad     = _gamePad;
+            // ── Ya no hay float beat ni float bpm locales ─────────────────────
+            // _currentBpm se actualiza en tiempo real desde UpdateSpeed
+            // WaitBeats lo lee en cada frame automáticamente
 
-            // Cancelar el loop anterior de bajo/pad si sigue corriendo, luego lanzar uno nuevo
+            float[]   melody    = isGame ? _gameMelody    : _menuMelody;
+            float[]   melDur    = isGame ? _gameMelodyDur : _menuMelodyDur;
+            float[]   bassNotes = isGame ? _gameBassNotes : _menuBassNotes;
+            float[]   bassDur   = isGame ? _gameBassDur   : _menuBassDur;
+            float[][] pad       = _gamePad;
+
             if (_bassLoopCoroutine != null) StopCoroutine(_bassLoopCoroutine);
-            _bassLoopCoroutine = StartCoroutine(BassAndPadLoop(beat, bassNotes, bassDur, pad));
+            _bassLoopCoroutine = StartCoroutine(BassAndPadLoop(bassNotes, bassDur, pad));
 
-            // Loop de melodía — itera sobre todas las notas
             for (int n = 0; n < melody.Length; n++)
             {
                 if (!_running || _modeChanged) break;
@@ -343,54 +349,65 @@ public class RunnerSynthAmbient : MonoBehaviour
                     _melodyNoteOn   = true;
                 }
 
-                float noteDur  = melDur[n] * beat;
-                // Hold del 80% de la nota → ligadura natural entre notas cercanas
-                float holdTime = noteDur * 0.80f;
-                float gapTime  = noteDur * 0.20f;
-
-                yield return new WaitForSeconds(holdTime);
+                // melDur[n] está en beats — WaitBeats convierte a tiempo real
+                // usando _currentBpm actualizado cada frame
+                yield return StartCoroutine(WaitBeats(melDur[n] * 0.80f));
                 _melodyNoteOn = false;
-                yield return new WaitForSeconds(gapTime);
+                yield return StartCoroutine(WaitBeats(melDur[n] * 0.20f));
             }
+        }
+    }
+
+    // Espera una duración en beats usando el BPM actual en tiempo real
+    // Chequea cada frame en lugar de fijar el tiempo al inicio
+    private IEnumerator WaitBeats(float beats)
+    {
+        float elapsed  = 0f;
+        float lastTime = Time.realtimeSinceStartup;
+
+        while (elapsed < beats)
+        {
+            yield return null;
+            float now   = Time.realtimeSinceStartup;
+            float delta = now - lastTime;
+            lastTime    = now;
+            // Lee _currentBpm en cada frame — se adapta al tempo dinámico
+            elapsed += delta / (60f / _currentBpm);
         }
     }
 
     // ── Loop de bajo y pad — corre en paralelo ────────────────────────────────
 
-    private IEnumerator BassAndPadLoop(float beat, float[] bassNotes, float[] bassDur, float[][] pad)
+    private IEnumerator BassAndPadLoop(float[] bassNotes, float[] bassDur, float[][] pad)
     {
-        // Cuántos "bloques de acorde" hay (1 acorde = 4 beats)
-        // El bajo tiene una nota por beat, el pad cambia cada 4 beats
         int totalBassNotes = bassNotes.Length;
-        int padChanges     = totalBassNotes / 4; // 4 notas de bajo por acorde
 
         for (int b = 0; b < totalBassNotes; b++)
         {
             if (!_running || _modeChanged) yield break;
 
-            // Actualizar el pad cada 4 notas de bajo (= cada compás)
+            // Actualizar pad cada 4 notas de bajo (= cada compás)
             if (b % 4 == 0 && playPad)
             {
-                int padIdx = (b / 4) % pad.Length;
+                int padIdx    = (b / 4) % pad.Length;
                 float[] chord = pad[padIdx];
                 SetPad(chord[0], chord[1], chord[2],
-                       chord.Length > 3 ? chord[3] : chord[2] * 1.5f);
+                    chord.Length > 3 ? chord[3] : chord[2] * 1.5f);
             }
 
-            // Bajo
+            // Bajo — duración en beats, WaitBeats usa _currentBpm dinámico
             if (playBass)
             {
                 _nextBassFreq = bassNotes[b];
                 _bassNoteOn   = true;
 
-                float dur = bassDur[b] * beat;
-                yield return new WaitForSeconds(dur * 0.55f);
+                yield return StartCoroutine(WaitBeats(bassDur[b] * 0.55f));
                 _bassNoteOn = false;
-                yield return new WaitForSeconds(dur * 0.45f);
+                yield return StartCoroutine(WaitBeats(bassDur[b] * 0.45f));
             }
             else
             {
-                yield return new WaitForSeconds(bassDur[b] * beat);
+                yield return StartCoroutine(WaitBeats(bassDur[b]));
             }
         }
     }

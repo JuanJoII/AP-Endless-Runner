@@ -303,16 +303,20 @@ public class RunnerAudioManager : MonoBehaviour
             // Sonido simple y corto: ping agudo metálico sin arpeggio
             case RunnerClip.Coin:
             {
-                float f = Vary(2200f, 0.03f);
-                SynthSFX coinSfx = Next();
-                coinSfx.numberOfHarmonics = 4;
-                coinSfx.harmonicAmplitudes = new float[] { 1f, 0.4f, 0.2f, 0.1f, 0f, 0f, 0f, 0f, 0f, 0f };
-                coinSfx.Play(f, SynthSFX.SynthType.Additive,
-                    atk: 0.001f, dec: 0.06f, sus: 0f, rel: 0.08f,
-                    vol: 0.30f * vol);
-                Next().Play(f * 2.756f, SynthSFX.SynthType.Sine,
-                    atk: 0.001f, dec: 0.04f, sus: 0f, rel: 0.05f,
-                    vol: 0.10f * vol);
+                // Hueso de pescado: dos capas
+                // Capa 1 — "toc" percusivo grave: FM con índice alto = sonido hueco de hueso
+                float bone = Vary(420f, 0.06f);
+                Next().Play(bone, SynthSFX.SynthType.FM,
+                    atk: 0.002f, dec: 0.08f, sus: 0f, rel: 0.06f,
+                    vol: 0.35f * vol,
+                    fmFreq: bone * 1.4f, fmIdx: 3.2f);
+
+                // Capa 2 — "pip" agudo: seno corto que le da el toque alegre
+                // Sale con un pequeño delay perceptual (0 en código pero llega
+                // después porque es la segunda llamada al pool)
+                Next().Play(Vary(1400f, 0.04f), SynthSFX.SynthType.Sine,
+                    atk: 0.001f, dec: 0.05f, sus: 0f, rel: 0.04f,
+                    vol: 0.18f * vol);
                 break;
             }
 

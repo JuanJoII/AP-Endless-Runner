@@ -13,6 +13,7 @@ using UnityEngine;
 public class DrumMachine : MonoBehaviour
 {
     [Range(0f, 1f)] public float masterVolume = 0.15f;
+    [HideInInspector] public float currentBpm = 130f;
 
     [Header("Kick")]
     public float kickStartFreq  = 80f;
@@ -28,6 +29,8 @@ public class DrumMachine : MonoBehaviour
     [Header("HiHat")]
     public float hihatDecay  = 0.05f;
     public float hihatCutoff = 0.6f;
+
+    
 
     // ── Estado interno ────────────────────────────────────────────────────────
 
@@ -155,13 +158,14 @@ public class DrumMachine : MonoBehaviour
     /// <summary>Patrón 4/4: Kick en 1 y 3, Snare en 2 y 4, HiHat en todos.</summary>
     public IEnumerator PlayPattern_Basic(float bpm, int bars = 1)
     {
-        float beat = 60f / bpm;
+        currentBpm = bpm;
+
         for (int b = 0; b < bars * 4; b++)
         {
             HiHat();
             if (b % 4 == 0 || b % 4 == 2) Kick();
             if (b % 4 == 1 || b % 4 == 3) Snare();
-            yield return new WaitForSeconds(beat);
+            yield return StartCoroutine(WaitBeats(1f));
         }
     }
 
@@ -173,7 +177,7 @@ public class DrumMachine : MonoBehaviour
         {
             if (b % 3 == 0) Kick();
             else            HiHat();
-            yield return new WaitForSeconds(beat);
+            yield return StartCoroutine(WaitBeats(beat));
         }
     }
 
@@ -188,46 +192,47 @@ public class DrumMachine : MonoBehaviour
             HiHat();
             if (b % 4 == 0 || b % 4 == 2) Kick();
             if (b % 4 == 1 || b % 4 == 3) Snare();
-            yield return new WaitForSeconds(triplet * 2f);
+            yield return StartCoroutine(WaitBeats(triplet * 2f));
             HiHat();
-            yield return new WaitForSeconds(triplet);
+            yield return StartCoroutine(WaitBeats(triplet));
         }
     }
 
     /// <summary>Patrón funk/blues callejero: kick en 1 y 3, snare en 2 y 4 + offbeat ghost.</summary>
     public IEnumerator PlayPattern_Funk(float bpm, int bars = 1)
     {
-        float beat = 60f / bpm;
-        float half = beat * 0.5f;
+        currentBpm = bpm; // inicializar
 
         for (int b = 0; b < bars * 4; b++)
         {
             int pos = b % 4;
 
-            if (pos == 0)
-            {
-                Kick();
-                HiHat();
-            }
-            else if (pos == 1)
-            {
-                Snare();
-                HiHat();
-            }
-            else if (pos == 2)
-            {
-                Kick();
-                HiHat();
-            }
-            else
-            {
-                Snare();
-                HiHat();
-            }
+            if (pos == 0)      { Kick();  HiHat(); }
+            else if (pos == 1) { Snare(); HiHat(); }
+            else if (pos == 2) { Kick();  HiHat(); }
+            else               { Snare(); HiHat(); }
 
-            yield return new WaitForSeconds(half);
+            yield return StartCoroutine(WaitBeats(0.5f));
             HiHat();
-            yield return new WaitForSeconds(half);
+            yield return StartCoroutine(WaitBeats(0.5f));
+        }
+    }
+
+    // ── Tempo dinámico ────────────────────────────────────────────────────────────
+
+    /// <summary>Espera una duración en beats usando currentBpm en tiempo real.</summary>
+    private IEnumerator WaitBeats(float beats)
+    {
+        float elapsed  = 0f;
+        float lastTime = Time.realtimeSinceStartup;
+
+        while (elapsed < beats)
+        {
+            yield return null;
+            float now   = Time.realtimeSinceStartup;
+            float delta = now - lastTime;
+            lastTime    = now;
+            elapsed    += delta / (60f / currentBpm);
         }
     }
 }
