@@ -1,6 +1,6 @@
 # Documentación Técnica: Sistema de Audio Procedural
 
-**Integrantes:** [Tu Nombre / Nombres del Grupo]
+**Integrantes:** [Juan José Camacho](https://github.com/JuanJoII), [Stefany López](https://github.com/StefanyLopez)
 
 **Curso:** Videojuegos Móviles
 
