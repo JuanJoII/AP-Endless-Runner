@@ -55,10 +55,16 @@ public abstract class Consumable : MonoBehaviour
     {
         m_SinceStart = 0;
 
-		if (activatedSound != null)
+        if (RunnerAudioManager.instance != null)
         {
-            if (RunnerAudioManager.instance != null)
-                RunnerAudioManager.instance.Play(RunnerClip.PowerUp);
+            RunnerClip clip = RunnerClip.PowerUp; // Default start sound
+            switch (GetConsumableType())
+            {
+                case ConsumableType.COIN_MAG: clip = RunnerClip.Object_Magnet; break;
+                case ConsumableType.INVINCIBILITY: clip = RunnerClip.Object_Invincible; break;
+                case ConsumableType.SCORE_MULTIPLAYER: clip = RunnerClip.Object_Multiplier; break;
+            }
+            RunnerAudioManager.instance.Play(clip);
         }
 
         if(ActivatedParticleReference != null)
@@ -98,18 +104,6 @@ public abstract class Consumable : MonoBehaviour
         {
             if (m_ParticleSpawned.main.loop)
                 Addressables.ReleaseInstance(m_ParticleSpawned.gameObject);
-        }
-
-        if (activatedSound != null && c.powerupSource.clip == activatedSound)
-            c.powerupSource.Stop(); //if this one the one using the audio source stop it
-
-        for (int i = 0; i < c.consumables.Count; ++i)
-        {
-            if (c.consumables[i].active && c.consumables[i].activatedSound != null)
-            {//if there is still an active consumable that have a sound, this is the one playing now
-                c.powerupSource.clip = c.consumables[i].activatedSound;
-                c.powerupSource.Play();
-            }
         }
     }
 }

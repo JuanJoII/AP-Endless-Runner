@@ -365,13 +365,31 @@ public class RunnerAudioManager : MonoBehaviour
                 break;
             }
 
-            // ── OBJETOS CON SONIDO SOSTENIDO ──────────────────────────────────
-            // Estos se manejan con PlayPowerupSound() / StopPowerupSound().
-            // Pero si alguien llama Play() directamente, lo redirigimos.
+            // ── OBJETOS CON SONIDO DE IMPACTO (ONE-SHOTS DE 1s) ──────────────────
             case RunnerClip.Object_Magnet:
+            {
+                // Pulso eléctrico: FM rápido con vibrato agresivo
+                float f = Vary(320f);
+                Next().Play(f, SynthSFX.SynthType.FM,
+                    atk: 0.005f, dec: 0.40f, sus: 0f, rel: 0.20f,
+                    vol: 0.35f * vol,
+                    fmFreq: 50f, fmIdx: 12.0f); // FM agresivo para el chisporroteo
+                break;
+            }
+
             case RunnerClip.Object_Invincible:
+            {
+                // Ráfaga estelar: Sweep ascendente brillante
+                float f = 440f;
+                Next().Play(f, SynthSFX.SynthType.Additive,
+                    atk: 0.01f, dec: 0.60f, sus: 0f, rel: 0.30f,
+                    vol: 0.40f * vol,
+                    sweep: true, sweepEnd: f * 4f, sweepDur: 0.5f);
+                break;
+            }
+
             case RunnerClip.Object_Multiplier:
-                PlayPowerupSound(clip);
+                StartCoroutine(PlayMultiplierSequence(vol));
                 break;
 
             // ── UI ────────────────────────────────────────────────────────────
@@ -500,6 +518,28 @@ public class RunnerAudioManager : MonoBehaviour
                 sus: 0f,
                 rel: i == freqs.Length - 1 ? 0.20f : 0.06f,
                 vol: (0.22f + i * 0.05f) * vol);
+
+            if (delays[i] > 0f)
+                yield return new WaitForSeconds(delays[i]);
+        }
+    }
+
+    private IEnumerator PlayMultiplierSequence(float vol)
+    {
+        // Arpegio ascendente Do Mayor (Do-Mi-Sol-Do) rápido y brillante
+        float[] freqs = { 523.25f, 659.25f, 783.99f, 1046.50f };
+        float[] delays = { 0.05f, 0.05f, 0.05f, 0f };
+
+        for (int i = 0; i < freqs.Length; i++)
+        {
+            float f = Vary(freqs[i], 0.015f);
+            bool isLast = i == freqs.Length - 1;
+            Next().Play(f, SynthSFX.SynthType.Additive,
+                atk: 0.005f,
+                dec: isLast ? 0.40f : 0.08f,
+                sus: 0f,
+                rel: isLast ? 0.30f : 0.06f,
+                vol: (0.32f + i * 0.04f) * vol);
 
             if (delays[i] > 0f)
                 yield return new WaitForSeconds(delays[i]);
