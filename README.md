@@ -2,7 +2,7 @@
 
 **Integrantes:** [Juan José Camacho](https://github.com/JuanJoII), [Stefany López](https://github.com/StefanyLopez)
 
-**Curso:** Videojuegos Móviles
+**Curso:** Audio Procedural
 
 **Fecha:** 19 de mayo de 2026
 
